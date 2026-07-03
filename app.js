@@ -26,11 +26,12 @@
   };
   const FINANCE_TYPE = {
     income: "Entrada",
+    "pending-income": "A receber",
     "paid-expense": "Gasto pago",
     "pending-expense": "Gasto pendente",
     "future-expense": "Gasto futuro",
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=17";
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=18";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -1970,6 +1971,9 @@
     const incomeTotal = movements
       .filter((movement) => movement.type === "income")
       .reduce((sum, movement) => sum + movement.amount, 0);
+    const receivableTotal = movements
+      .filter((movement) => movement.type === "pending-income")
+      .reduce((sum, movement) => sum + movement.amount, 0);
     const paidExpenseTotal = movements
       .filter((movement) => movement.type === "paid-expense")
       .reduce((sum, movement) => sum + movement.amount, 0);
@@ -1991,6 +1995,7 @@
 
     $("#financeStats").innerHTML = [
       ["Total de entradas", formatMoney(incomeTotal)],
+      ["Locações a receber", formatMoney(receivableTotal)],
       ["Total de gastos", formatMoney(investmentTotal + costTotal)],
       ["Total de investimentos", formatMoney(investmentTotal)],
       ["Total de custos", formatMoney(costTotal)],
@@ -2019,7 +2024,7 @@
 
   function renderFinanceCharts(movements, totals) {
     const expenseMovements = movements.filter((movement) => movement.source === "expense");
-    const incomeMovements = movements.filter((movement) => movement.source === "rental");
+    const incomeMovements = movements.filter((movement) => movement.source === "rental" && movement.type === "income");
 
     drawPieChart("financeMixChart", "financeMixLegend", [
       { label: "Entradas", value: totals.incomeTotal, color: "#138a43" },
@@ -2134,25 +2139,47 @@
   }
 
   function getFinanceMovements() {
-    const incomes = state.rentals
+    const rentalMovements = state.rentals
       .filter(isRentalFinancialEntry)
-      .map((rental) => {
+      .flatMap((rental) => {
         const client = getClient(rental.clientId);
-        return {
-          id: `rental-${rental.id}`,
+        const totals = getRentalTotals(rental);
+        const receivedAmount = getRentalReceivedAmount(rental);
+        const receivableAmount = getRentalReceivableAmount(rental);
+        const baseMovement = {
           source: "rental",
-          type: "income",
           category: "Locações",
           date: rental.startDate || rental.orderDate,
-          amount: getRentalTotals(rental).total,
           title: `Pedido ${rental.orderNumber}`,
           clientName: client?.name || "Cliente não encontrado",
-          itemText: rental.items.map((line) => `${line.qty}x ${line.name}`).join(", "),
+          itemText: (Array.isArray(rental.items) ? rental.items : []).map((line) => `${line.qty}x ${line.name}`).join(", "),
           startDate: rental.startDate,
           endDate: rental.endDate,
           paymentMethod: rental.paymentMethod || "-",
           paymentStatus: rental.paymentStatus || "unpaid",
+          rentalTotal: totals.total,
         };
+
+        const movements = [];
+        if (receivedAmount > 0) {
+          movements.push({
+            ...baseMovement,
+            id: `rental-income-${rental.id}`,
+            type: "income",
+            amount: receivedAmount,
+          });
+        }
+
+        if (receivableAmount > 0) {
+          movements.push({
+            ...baseMovement,
+            id: `rental-receivable-${rental.id}`,
+            type: "pending-income",
+            amount: receivableAmount,
+          });
+        }
+
+        return movements;
       });
 
     const expenses = state.expenses.map((expense) => ({
@@ -2173,7 +2200,27 @@
       installmentTotal: expense.installmentTotal,
     }));
 
-    return [...incomes, ...expenses].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    return [...rentalMovements, ...expenses].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  }
+
+  function getRentalReceivedAmount(rental) {
+    const totals = getRentalTotals(rental);
+    const paymentStatus = rental?.paymentStatus || "unpaid";
+
+    if (paymentStatus === "paid") {
+      return totals.total;
+    }
+
+    if (paymentStatus === "partial") {
+      return Math.min(totals.total, totals.deposit);
+    }
+
+    return 0;
+  }
+
+  function getRentalReceivableAmount(rental) {
+    const totals = getRentalTotals(rental);
+    return Math.max(0, roundMoney(totals.total - getRentalReceivedAmount(rental)));
   }
 
   function isMovementInFinanceFilters(movement) {
@@ -2197,20 +2244,22 @@
 
   function renderFinanceMovementCard(movement) {
     if (movement.source === "rental") {
+      const isReceived = movement.type === "income";
       return `
         <article class="data-card">
           <div class="card-top">
             <div>
-              <h3 class="card-title">Entrada - ${escapeHtml(movement.title)}</h3>
+              <h3 class="card-title">${isReceived ? "Entrada" : "A receber"} - ${escapeHtml(movement.title)}</h3>
               <p class="card-subtitle">${escapeHtml(movement.clientName)} · ${formatDate(movement.startDate)} a ${formatDate(movement.endDate)}</p>
             </div>
             <div class="badge-row">
-              <span class="badge green">${FINANCE_TYPE[movement.type]}</span>
+              <span class="badge ${isReceived ? "green" : "yellow"}">${FINANCE_TYPE[movement.type]}</span>
               <span class="badge">${PAYMENT_STATUS[movement.paymentStatus] || movement.paymentStatus}</span>
             </div>
           </div>
           <div class="metric-grid">
-            <div class="metric"><span>Valor da locação</span><strong>${formatMoney(movement.amount)}</strong></div>
+            <div class="metric"><span>${isReceived ? "Valor recebido" : "Valor a receber"}</span><strong>${formatMoney(movement.amount)}</strong></div>
+            <div class="metric"><span>Total da locação</span><strong>${formatMoney(movement.rentalTotal)}</strong></div>
             <div class="metric"><span>Pagamento</span><strong>${escapeHtml(movement.paymentMethod)}</strong></div>
             <div class="metric"><span>Data</span><strong>${formatDate(movement.date)}</strong></div>
             <div class="metric"><span>Categoria</span><strong>${escapeHtml(movement.category)}</strong></div>
