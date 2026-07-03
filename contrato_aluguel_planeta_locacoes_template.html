@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Contrato de Aluguel - Planeta Locações</title>
+<style>
+  @page { size: A4 portrait; margin: 4.5mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #111; background: white; font-size: 7.35pt; }
+  .page { width: 201mm; margin: 0 auto; }
+  .contract { width: 100%; height: 137.5mm; border: 1.3pt solid #003c9e; border-radius: 7px; padding: 2.1mm 4mm 1.4mm; position: relative; overflow: hidden; }
+  .top-accent { position: absolute; left: 0; top: 0; height: 3mm; width: 30%; background: #d70000; }
+  .top-accent-blue { position: absolute; left: 30%; top: 0; height: 3mm; right: 0; background: #003ca6; }
+  .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 3mm; margin-top: 2.3mm; }
+  .brand { min-width: 44mm; line-height: 1; }
+  .brand-main { font-weight: 800; font-size: 13.8pt; letter-spacing: .1pt; }
+  .brand-main .planet { color: #003ca6; margin-right: 5.5mm; }
+  .brand-main .rent { color: #d70000; }
+  .tagline { font-size: 6.1pt; color: #333; margin-top: .8mm; }
+  .title-wrap { flex: 1; text-align: right; }
+  .title-box { display: inline-block; background: #003ca6; color: white; padding: 2.2mm 9mm 1.8mm; border-radius: 0 0 6px 6px; font-weight: 800; font-size: 10.2pt; letter-spacing: .3pt; min-width: 61mm; text-align: center; }
+  .via-line { font-size: 6.5pt; margin-top: .7mm; color: #111; }
+  .info-bar { display:flex; justify-content:space-between; align-items:center; border: .7pt solid #b8c5e6; padding: .75mm 1.5mm; margin-top: 1.4mm; font-size: 5.9pt; }
+  .section-title { background: #003ca6; color: #fff; font-weight: 800; padding: .8mm 1.5mm; margin-top: 1.15mm; font-size: 7pt; }
+  .linebox { border-left: .75pt solid #b8c5e6; border-right: .75pt solid #b8c5e6; border-bottom: .75pt solid #b8c5e6; }
+  .row { display: flex; min-height: 4.8mm; border-bottom: .7pt solid #c6d0e9; }
+  .row:last-child { border-bottom: 0; }
+  .cell { padding: .8mm 1.4mm .65mm; flex: 1; }
+  .cell.small { flex: .33; }
+  .cell.medium { flex: .55; }
+  .right-cell { border-left: .75pt solid #c6d0e9; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th, td { border: .7pt solid #b8c5e6; padding: .75mm 1.1mm; vertical-align: middle; }
+  th { background: #eef4ff; color: #002d8f; font-weight: 800; text-align: center; font-size: 7.1pt; }
+  td { font-size: 6.9pt; }
+  .qtd { width: 13mm; text-align:center; }
+  .desc { width: auto; }
+  .money { width: 28mm; text-align:center; white-space: nowrap; }
+  .total { width: 31mm; text-align:right; white-space: nowrap; }
+  .totals { display:flex; flex-wrap: wrap; gap:.8mm 2.2mm; border: .7pt solid #b8c5e6; margin-top: 1.2mm; padding: .8mm 1.2mm; font-size: 6.7pt; }
+  .totals > div { flex: 1 1 25mm; white-space: nowrap; }
+  .payment { display:flex; justify-content:space-between; border-left:.7pt solid #b8c5e6; border-right:.7pt solid #b8c5e6; border-bottom:.7pt solid #b8c5e6; padding: .8mm 1.2mm; background:#f7fbff; font-size: 6.7pt; }
+  .obs { margin-top: .85mm; border: .7pt solid #ffc3c3; background: #fff3f3; color: #d70000; padding: .75mm 1.1mm; font-size: 5.7pt; line-height: 1.05; }
+  .signatures { display:flex; justify-content:space-around; margin-top: 6.2mm; font-size: 5.9pt; }
+  .sig { width: 42%; text-align:center; border-top: 1.1pt solid #003ca6; padding-top: .7mm; }
+  .cut { height: 6mm; display:flex; align-items:center; justify-content:center; color:#777; font-size:7pt; position:relative; }
+  .cut::before { content:""; position:absolute; left:0; right:0; top:50%; border-top:1pt dashed #888; z-index:0; }
+  .cut span { background:white; padding:0 4mm; z-index:1; }
+  .field-line { display:inline-block; min-width: 26mm; border-bottom: .75pt solid #777; height: 3.6mm; vertical-align: bottom; }
+  .nowrap { white-space: nowrap; }
+  .muted { color: #333; }
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+  body.density-compact { font-size: 6.8pt; }
+  body.density-compact .contract { padding: 1.7mm 3.4mm 1.2mm; }
+  body.density-compact .header { gap: 2.4mm; margin-top: 1.9mm; }
+  body.density-compact .brand-main { font-size: 12.5pt; }
+  body.density-compact .brand-main .planet { margin-right: 4.5mm; }
+  body.density-compact .tagline { font-size: 5.6pt; margin-top: .55mm; }
+  body.density-compact .title-box { font-size: 9.3pt; padding: 1.9mm 7.5mm 1.55mm; min-width: 55mm; }
+  body.density-compact .via-line { font-size: 5.8pt; margin-top: .55mm; }
+  body.density-compact .info-bar { margin-top: 1mm; padding: .55mm 1.2mm; font-size: 5.4pt; }
+  body.density-compact .section-title { margin-top: .85mm; padding: .62mm 1.2mm; font-size: 6.4pt; }
+  body.density-compact .row { min-height: 4.1mm; }
+  body.density-compact .cell { padding: .62mm 1.15mm .45mm; }
+  body.density-compact th,
+  body.density-compact td { padding: .55mm .85mm; }
+  body.density-compact th { font-size: 6.4pt; }
+  body.density-compact td { font-size: 6.2pt; }
+  body.density-compact .totals,
+  body.density-compact .payment { padding: .6mm 1mm; font-size: 6.1pt; }
+  body.density-compact .obs { margin-top: .65mm; padding: .58mm .9mm; font-size: 5.3pt; line-height: 1.02; }
+  body.density-compact .signatures { margin-top: 4mm; font-size: 5.5pt; }
+  body.density-tight { font-size: 6.3pt; }
+  body.density-tight .contract { padding: 1.4mm 3.1mm 1mm; }
+  body.density-tight .header { margin-top: 1.7mm; }
+  body.density-tight .brand-main { font-size: 11.7pt; }
+  body.density-tight .title-box { font-size: 8.6pt; padding: 1.65mm 6.5mm 1.35mm; min-width: 51mm; }
+  body.density-tight .tagline,
+  body.density-tight .via-line,
+  body.density-tight .info-bar { font-size: 5.1pt; }
+  body.density-tight .section-title { margin-top: .65mm; padding: .52mm 1mm; font-size: 6pt; }
+  body.density-tight .row { min-height: 3.7mm; }
+  body.density-tight .cell { padding: .5mm .95mm .35mm; }
+  body.density-tight th,
+  body.density-tight td { padding: .42mm .7mm; }
+  body.density-tight th { font-size: 5.9pt; }
+  body.density-tight td { font-size: 5.8pt; }
+  body.density-tight .qtd { width: 11mm; }
+  body.density-tight .money { width: 25mm; }
+  body.density-tight .total { width: 28mm; }
+  body.density-tight .totals,
+  body.density-tight .payment { padding: .45mm .8mm; font-size: 5.7pt; }
+  body.density-tight .obs { margin-top: .5mm; padding: .48mm .8mm; font-size: 5pt; line-height: 1; }
+  body.density-tight .signatures { margin-top: 2.4mm; font-size: 5.2pt; }
+  body.multi-page .contract { height: auto; min-height: 137.5mm; overflow: visible; page-break-inside: auto; break-inside: auto; }
+  body.multi-page tr,
+  body.multi-page .totals,
+  body.multi-page .payment,
+  body.multi-page .obs,
+  body.multi-page .signatures,
+  body.multi-page .cut { page-break-inside: avoid; break-inside: avoid; }
+  body.multi-page .contract + .cut { margin: 1mm 0; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- VIA 1 -->
+  <section class="contract">
+    <div class="top-accent"></div><div class="top-accent-blue"></div>
+    <div class="header">
+      <div class="brand">
+        <div class="brand-main"><span class="planet">Planeta</span><span class="rent">Locações</span></div>
+        <div class="tagline">Eventos do seu jeito | Uma marca da Planeta Móveis</div>
+      </div>
+      <div class="title-wrap">
+        <div class="title-box">CONTRATO DE ALUGUEL</div>
+        <div class="via-line">Via 1 - Nº {{numero_contrato}} &nbsp;&nbsp; Data: {{data_emissao}}</div>
+      </div>
+    </div>
+
+    <div class="info-bar">
+      <span>Av. Fernando Costa nº 44 - V. Jaiara - Anápolis-GO</span>
+      <span>Gabriel: (62) 99935-1052 | @planeta_locacoes_anapolis</span>
+    </div>
+
+    <div class="section-title">DADOS DO LOCATÁRIO</div>
+    <div class="linebox">
+      <div class="row"><div class="cell">Nome: {{nome_cliente}}</div><div class="cell medium right-cell">Telefone: {{telefone_cliente}}</div></div>
+      <div class="row"><div class="cell">CPF/CNPJ: {{cpf_cnpj}}</div></div>
+      <div class="row"><div class="cell">Endereço: {{endereco_cliente}} &nbsp; | &nbsp; Ref.: {{referencia_endereco}}</div></div>
+    </div>
+
+    <div class="section-title">DADOS DO ALUGUEL</div>
+    <div class="linebox">
+      <div class="row"><div class="cell">Data/período: {{periodo}}</div><div class="cell medium right-cell">Horário: {{horario}}</div></div>
+      <div class="row"><div class="cell">Local de entrega/evento: {{local_evento}}</div></div>
+    </div>
+
+    <div class="section-title">ITENS ALUGADOS</div>
+    <table>
+      <thead><tr><th class="qtd">Qtd.</th><th class="desc">Descrição dos itens</th><th class="money">Vlr. unit.</th><th class="total">Total</th></tr></thead>
+      <tbody>
+        <!-- O sistema deve repetir esta linha para cada item em itens[] -->
+        {{linhas_itens}}
+      </tbody>
+    </table>
+
+    <div class="totals">
+      <div>Subtotal: <strong>{{subtotal_itens}}</strong></div>
+      <div>Desconto: <strong>{{desconto}}</strong></div>
+      <div>Frete: <strong>{{frete}}</strong></div>
+      <div>Total final: <strong>{{valor_total}}</strong></div>
+      <div>Sinal: <strong>{{sinal}}</strong></div>
+      <div>Restante: <strong>{{restante}}</strong></div>
+    </div>
+    <div class="payment">
+      <span><strong>Pix:</strong> {{pix}}</span>
+      <span><strong>Titular:</strong> {{titular_pix}}</span>
+    </div>
+
+    <div class="obs"><strong>Condições:</strong> Os itens devem ser devolvidos nas mesmas condições de entrega. Danos, perdas, extravios e atraso na devolução são de responsabilidade do locatário. O sinal confirma a reserva e o restante deve ser quitado conforme combinado.</div>
+    <div class="signatures"><div class="sig">Assinatura do locador</div><div class="sig">Assinatura do locatário</div></div>
+  </section>
+
+  <div class="cut"><span>corte aqui</span></div>
+
+  <!-- VIA 2 -->
+  <section class="contract">
+    <div class="top-accent"></div><div class="top-accent-blue"></div>
+    <div class="header">
+      <div class="brand">
+        <div class="brand-main"><span class="planet">Planeta</span><span class="rent">Locações</span></div>
+        <div class="tagline">Eventos do seu jeito | Uma marca da Planeta Móveis</div>
+      </div>
+      <div class="title-wrap">
+        <div class="title-box">CONTRATO DE ALUGUEL</div>
+        <div class="via-line">Via 2 - Nº {{numero_contrato}} &nbsp;&nbsp; Data: {{data_emissao}}</div>
+      </div>
+    </div>
+
+    <div class="info-bar">
+      <span>Av. Fernando Costa nº 44 - V. Jaiara - Anápolis-GO</span>
+      <span>Gabriel: (62) 99935-1052 | @planeta_locacoes_anapolis</span>
+    </div>
+
+    <div class="section-title">DADOS DO LOCATÁRIO</div>
+    <div class="linebox">
+      <div class="row"><div class="cell">Nome: {{nome_cliente}}</div><div class="cell medium right-cell">Telefone: {{telefone_cliente}}</div></div>
+      <div class="row"><div class="cell">CPF/CNPJ: {{cpf_cnpj}}</div></div>
+      <div class="row"><div class="cell">Endereço: {{endereco_cliente}} &nbsp; | &nbsp; Ref.: {{referencia_endereco}}</div></div>
+    </div>
+
+    <div class="section-title">DADOS DO ALUGUEL</div>
+    <div class="linebox">
+      <div class="row"><div class="cell">Data/período: {{periodo}}</div><div class="cell medium right-cell">Horário: {{horario}}</div></div>
+      <div class="row"><div class="cell">Local de entrega/evento: {{local_evento}}</div></div>
+    </div>
+
+    <div class="section-title">ITENS ALUGADOS</div>
+    <table>
+      <thead><tr><th class="qtd">Qtd.</th><th class="desc">Descrição dos itens</th><th class="money">Vlr. unit.</th><th class="total">Total</th></tr></thead>
+      <tbody>
+        <!-- O sistema deve repetir esta linha para cada item em itens[] -->
+        {{linhas_itens}}
+      </tbody>
+    </table>
+
+    <div class="totals">
+      <div>Subtotal: <strong>{{subtotal_itens}}</strong></div>
+      <div>Desconto: <strong>{{desconto}}</strong></div>
+      <div>Frete: <strong>{{frete}}</strong></div>
+      <div>Total final: <strong>{{valor_total}}</strong></div>
+      <div>Sinal: <strong>{{sinal}}</strong></div>
+      <div>Restante: <strong>{{restante}}</strong></div>
+    </div>
+    <div class="payment">
+      <span><strong>Pix:</strong> {{pix}}</span>
+      <span><strong>Titular:</strong> {{titular_pix}}</span>
+    </div>
+
+    <div class="obs"><strong>Condições:</strong> Os itens devem ser devolvidos nas mesmas condições de entrega. Danos, perdas, extravios e atraso na devolução são de responsabilidade do locatário. O sinal confirma a reserva e o restante deve ser quitado conforme combinado.</div>
+    <div class="signatures"><div class="sig">Assinatura do locador</div><div class="sig">Assinatura do locatário</div></div>
+  </section>
+
+</div>
+</body>
+</html>

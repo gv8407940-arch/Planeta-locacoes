@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Planeta Locações">
+  <rect width="512" height="512" rx="92" fill="#0b4ea2"/>
+  <path d="M88 302c38 70 124 104 203 77 88-29 139-116 115-194" fill="none" stroke="#ffffff" stroke-width="32" stroke-linecap="round"/>
+  <path d="M103 210c43-69 132-99 208-68 70 29 111 99 103 170" fill="none" stroke="#df1f2d" stroke-width="32" stroke-linecap="round"/>
+  <circle cx="256" cy="256" r="96" fill="#ffffff"/>
+  <text x="256" y="286" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="92" font-weight="800" fill="#0b4ea2">PL</text>
+</svg>

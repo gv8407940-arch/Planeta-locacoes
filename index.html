@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b4ea2">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Planeta Locações">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="format-detection" content="telephone=no">
+  <title>Planeta Locações</title>
+  <link rel="manifest" href="manifest.json?v=16">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
+  <link rel="stylesheet" href="style.css?v=16">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-mark" aria-hidden="true">PL</div>
+      <div class="brand-copy">
+        <p>Planeta Móveis</p>
+        <h1>Planeta Locações</h1>
+        <span>Eventos do seu jeito</span>
+      </div>
+      <button id="installBtn" class="ghost-action" type="button" hidden>Instalar</button>
+    </header>
+
+    <nav class="app-nav" aria-label="Telas do sistema">
+      <button class="nav-btn active" type="button" data-view="dashboard">Início</button>
+      <button class="nav-btn" type="button" data-view="stock">Estoque</button>
+      <button class="nav-btn" type="button" data-view="kits">Conjuntos</button>
+      <button class="nav-btn" type="button" data-view="clients">Clientes</button>
+      <button class="nav-btn" type="button" data-view="new-rental">Nova locação</button>
+      <button class="nav-btn" type="button" data-view="rentals">Locações</button>
+      <button class="nav-btn" type="button" data-view="expenses">Gastos</button>
+      <button class="nav-btn" type="button" data-view="finance">Relatório Financeiro</button>
+      <button class="nav-btn" type="button" data-view="backup">Backup</button>
+    </nav>
+
+    <main>
+      <section id="view-dashboard" class="view active" aria-labelledby="dashboardTitle">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Visão geral</p>
+            <h2 id="dashboardTitle">Resumo do dia</h2>
+          </div>
+          <button class="primary-action" type="button" data-shortcut-view="new-rental">Nova locação</button>
+        </div>
+
+        <div id="dashboardStats" class="kpi-grid"></div>
+
+        <div class="split-layout">
+          <section class="panel">
+            <div class="panel-head">
+              <h3>Agenda de hoje</h3>
+            </div>
+            <div id="todayList" class="compact-list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h3>Alertas de estoque</h3>
+            </div>
+            <div id="dashboardAlerts" class="compact-list"></div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Disponibilidade por item</h3>
+          </div>
+          <div id="inventorySummary" class="inventory-strip"></div>
+        </section>
+      </section>
+
+      <section id="view-stock" class="view" aria-labelledby="stockTitle">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Itens, forros e conjuntos</p>
+            <h2 id="stockTitle">Estoque</h2>
+          </div>
+          <button id="newItemBtn" class="primary-action" type="button">Cadastrar item</button>
+        </div>
+
+        <div class="toolbar">
+          <label>
+            Buscar
+            <input id="stockSearch" type="search" placeholder="Nome do item">
+          </label>
+          <label>
+            Categoria
+            <select id="stockCategoryFilter"></select>
+          </label>
+          <label>
+            Cor
+            <select id="stockColorFilter"></select>
+          </label>
+        </div>
+
+        <div id="stockList" class="data-list"></div>
+      </section>
+
+      <section id="view-kits" class="view" aria-labelledby="kitsTitle">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Kits rápidos para locação</p>
+            <h2 id="kitsTitle">Conjuntos</h2>
+          </div>
+          <button id="newKitBtn" class="primary-action" type="button">Cadastrar conjunto</button>
+        </div>
+
+        <div id="kitsList" class="data-list"></div>
+      </section>
+
+      <section id="view-clients" class="view" aria-labelledby="clientsTitle">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Cadastro e histórico</p>
+            <h2 id="clientsTitle">Clientes</h2>
+          </div>
+          <button id="newClientBtn" class="primary-action" type="button">Cadastrar cliente</button>
+        </div>
+
+        <div class="toolbar single">
+          <label>
+            Pesquisar cliente
+            <input id="clientsSearch" type="search" placeholder="Nome, telefone ou documento">
+          </label>
+        </div>
+
+        <div id="clientsList" class="data-list"></div>
+      </section>
+
+      <section id="view-new-rental" class="view" aria-labelledby="newRentalTitle">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Pedido, reserva ou orçamento</p>
+            <h2 id="newRentalTitle">Nova locação</h2>
+          </div>
+          <button id="resetRentalBtn" class="ghost-action" type="button">Limpar formulário</button>
+        </div>
+
+        <form id="rentalForm" class="form-panel">
+          <input id="rentalId" type="hidden">
+          <input id="rentalClientId" type="hidden">
+
+          <section class="line-editor" aria-label="Dados do cliente">
+            <div class="panel-head">
+              <h3>Dados do cliente</h3>
+            </div>
+
+            <div class="form-grid">
+              <label>
+                Nome
+                <input id="rentalClientName" type="text" required placeholder="Nome do cliente">
+              </label>
+
+              <label>
+                CPF
+                <input id="rentalClientCpf" type="text" required inputmode="numeric" autocomplete="off" placeholder="000.000.000-00">
+              </label>
+
+              <label>
+                Telefone/WhatsApp
+                <input id="rentalClientPhone" type="tel" placeholder="(62) 99999-0000">
+              </label>
+
+              <label class="wide">
+                Endereço
+                <input id="rentalClientAddress" type="text" placeholder="Opcional">
+              </label>
+
+              <p id="clientMatchInfo" class="muted-text wide"></p>
+            </div>
+          </section>
+
+          <div class="form-grid">
+            <label>
+              Data do pedido
+              <input id="rentalOrderDate" type="date" required>
+            </label>
+
+            <label>
+              Data de retirada ou entrega
+              <input id="rentalStartDate" type="date" required>
+            </label>
+
+            <label>
+              Data de devolução ou retirada
+              <input id="rentalEndDate" type="date" required>
+            </label>
+
+            <label class="wide">
+              Local do evento
+              <input id="rentalEventLocation" type="text" placeholder="Opcional">
+            </label>
+          </div>
+
+          <section class="line-editor" aria-label="Itens alugados">
+            <div class="panel-head">
+              <h3>Itens da locação</h3>
+            </div>
+
+            <div class="subsection-title">Adicionar conjunto</div>
+            <div class="add-line">
+              <label>
+                Conjunto
+                <select id="rentalKitSelect"></select>
+              </label>
+              <label>
+                Quantidade
+                <input id="rentalKitQty" type="number" inputmode="numeric" min="1" value="1">
+              </label>
+              <button id="addRentalKitBtn" class="secondary-action" type="button">Adicionar conjunto</button>
+            </div>
+
+            <div class="subsection-title">Adicionar item avulso</div>
+            <div class="add-line">
+              <label>
+                Item
+                <select id="rentalItemSelect"></select>
+              </label>
+              <label>
+                Quantidade
+                <input id="rentalItemQty" type="number" inputmode="numeric" min="1" value="1">
+              </label>
+              <button id="addRentalItemBtn" class="secondary-action" type="button">Adicionar</button>
+            </div>
+
+            <div id="rentalItemsEditor" class="line-list"></div>
+          </section>
+
+          <div class="form-grid">
+            <label>
+              Desconto
+              <input id="rentalDiscount" type="number" inputmode="decimal" min="0" step="0.01" value="0">
+            </label>
+
+            <label>
+              Frete
+              <input id="rentalFreight" type="number" inputmode="decimal" min="0" step="0.01" value="0">
+            </label>
+
+            <label>
+              Sinal
+              <input id="rentalDeposit" type="number" inputmode="decimal" min="0" step="0.01" value="0">
+            </label>
+
+            <label>
+              Forma de pagamento
+              <select id="rentalPaymentMethod">
+                <option>Pix</option>
+                <option>Dinheiro</option>
+                <option>Cartão</option>
+                <option>Outro</option>
+              </select>
+            </label>
+
+            <label>
+              Status do pagamento
+              <select id="rentalPaymentStatus">
+                <option value="unpaid">Não pago</option>
+                <option value="partial">Sinal pago</option>
+                <option value="paid">Pago completo</option>
+              </select>
+            </label>
+
+            <label>
+              Status da locação
+              <select id="rentalStatus">
+                <option value="quote">Orçamento</option>
+                <option value="reserved">Reservado</option>
+                <option value="delivered">Entregue/alugado</option>
+                <option value="returned">Devolvido</option>
+                <option value="cancelled">Cancelado</option>
+              </select>
+            </label>
+
+            <label class="wide">
+              Observações
+              <textarea id="rentalNotes" rows="3" placeholder="Condições, combinado com cliente ou detalhes da entrega"></textarea>
+            </label>
+          </div>
+
+          <div id="rentalTotals" class="totals-box"></div>
+
+          <div class="form-actions">
+            <button class="secondary-action" type="button" id="generateContractBtn">Gerar contrato</button>
+            <button class="secondary-action" type="button" id="saveQuoteBtn">Salvar orçamento</button>
+            <button class="primary-action" type="button" id="saveReservationBtn">Confirmar reserva</button>
+            <button class="primary-action red" type="submit">Salvar com status atual</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="view-rentals" class="view" aria-labelledby="rentalsTitle">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Pedidos e comprovantes</p>
+            <h2 id="rentalsTitle">Locações</h2>
+          </div>
+          <button class="primary-action" type="button" data-shortcut-view="new-rental">Nova locação</button>
+        </div>
+
+        <div class="toolbar">
+          <label>
+            Buscar
+            <input id="rentalsSearch" type="search" placeholder="Pedido, cliente ou item">
+          </label>
+          <label>
+            Status
+            <select id="rentalStatusFilter">
+              <option value="">Todos</option>
+              <option value="quote">Orçamento</option>
+              <option value="reserved">Reservado</option>
+              <option value="delivered">Entregue/alugado</option>
+              <option value="returned">Devolvido</option>
+              <option value="cancelled">Cancelado</option>
+            </select>
+          </label>
+          <label>
+            Data
+            <input id="rentalDateFilter" type="date">
+          </label>
+        </div>
+
+        <div id="rentalsList" class="data-list rentals-list"></div>
+      </section>
+
+      <section id="view-expenses" class="view" aria-labelledby="expensesTitle">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Despesas da empresa</p>
+            <h2 id="expensesTitle">Gastos</h2>
+          </div>
+          <div class="badge-row">
+            <button id="newExpenseBtn" class="secondary-action" type="button">Cadastrar gasto</button>
+            <button id="newInstallmentBtn" class="primary-action" type="button">Cadastrar parcelas</button>
+          </div>
+        </div>
+
+        <div id="expenseStats" class="kpi-grid"></div>
+
+        <div class="toolbar">
+          <label>
+            Buscar
+            <input id="expenseSearch" type="search" placeholder="Descrição, categoria ou observação">
+          </label>
+          <label>
+            Tipo
+            <select id="expenseTypeFilter">
+              <option value="">Todos</option>
+              <option value="investment">Investimento</option>
+              <option value="cost">Custo</option>
+            </select>
+          </label>
+          <label>
+            Status
+            <select id="expenseStatusFilter">
+              <option value="">Todos</option>
+              <option value="paid">Pago</option>
+              <option value="pending">Pendente</option>
+              <option value="overdue">Atrasado</option>
+              <option value="installment">Parcelado</option>
+            </select>
+          </label>
+          <label>
+            Categoria
+            <select id="expenseCategoryFilter"></select>
+          </label>
+        </div>
+
+        <div id="expenseList" class="data-list rentals-list"></div>
+      </section>
+
+      <section id="view-finance" class="view" aria-labelledby="financeTitle">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Entradas, gastos e parcelas</p>
+            <h2 id="financeTitle">Relatório Financeiro</h2>
+          </div>
+        </div>
+
+        <div id="financeStats" class="kpi-grid"></div>
+
+        <div class="chart-grid">
+          <section class="panel chart-panel">
+            <div class="panel-head">
+              <h3>Entradas x custos x investimentos</h3>
+            </div>
+            <canvas id="financeMixChart" height="230"></canvas>
+            <div id="financeMixLegend" class="chart-legend"></div>
+          </section>
+
+          <section class="panel chart-panel">
+            <div class="panel-head">
+              <h3>Gastos por categoria</h3>
+            </div>
+            <canvas id="categoryExpenseChart" height="230"></canvas>
+            <div id="categoryExpenseLegend" class="chart-legend"></div>
+          </section>
+
+          <section class="panel chart-panel">
+            <div class="panel-head">
+              <h3>Gastos pagos x pendentes</h3>
+            </div>
+            <canvas id="expenseStatusChart" height="230"></canvas>
+            <div id="expenseStatusLegend" class="chart-legend"></div>
+          </section>
+
+          <section class="panel chart-panel">
+            <div class="panel-head">
+              <h3>Receitas das locações</h3>
+            </div>
+            <canvas id="rentalRevenueChart" height="230"></canvas>
+            <div id="rentalRevenueLegend" class="chart-legend"></div>
+          </section>
+        </div>
+
+        <div class="toolbar">
+          <label>
+            Início
+            <input id="financeStartFilter" type="date">
+          </label>
+          <label>
+            Fim
+            <input id="financeEndFilter" type="date">
+          </label>
+          <label>
+            Mês
+            <select id="financeMonthFilter">
+              <option value="">Todos</option>
+              <option value="01">Janeiro</option>
+              <option value="02">Fevereiro</option>
+              <option value="03">Março</option>
+              <option value="04">Abril</option>
+              <option value="05">Maio</option>
+              <option value="06">Junho</option>
+              <option value="07">Julho</option>
+              <option value="08">Agosto</option>
+              <option value="09">Setembro</option>
+              <option value="10">Outubro</option>
+              <option value="11">Novembro</option>
+              <option value="12">Dezembro</option>
+            </select>
+          </label>
+          <label>
+            Ano
+            <input id="financeYearFilter" type="number" min="2000" max="2100" inputmode="numeric" placeholder="Todos">
+          </label>
+          <label>
+            Tipo
+            <select id="financeTypeFilter">
+              <option value="">Todos</option>
+              <option value="income">Entrada</option>
+              <option value="paid-expense">Gasto pago</option>
+              <option value="pending-expense">Gasto pendente</option>
+              <option value="future-expense">Gasto futuro</option>
+            </select>
+          </label>
+          <label>
+            Categoria
+            <select id="financeCategoryFilter"></select>
+          </label>
+        </div>
+
+        <div class="split-layout">
+          <section class="panel">
+            <div class="panel-head">
+              <h3>Próximos vencimentos</h3>
+            </div>
+            <div id="upcomingFinanceList" class="compact-list"></div>
+          </section>
+
+          <section class="panel danger-panel">
+            <div class="panel-head">
+              <h3>Gastos atrasados</h3>
+            </div>
+            <div id="overdueFinanceList" class="compact-list"></div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Movimentações</h3>
+          </div>
+          <div id="financeList" class="data-list rentals-list"></div>
+        </section>
+      </section>
+
+      <section id="view-backup" class="view" aria-labelledby="backupTitle">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Dados locais deste aparelho</p>
+            <h2 id="backupTitle">Backup</h2>
+          </div>
+        </div>
+
+        <div class="backup-grid">
+          <section class="panel install-panel">
+            <h3>Usar no iPhone sem computador</h3>
+            <p>Para o iPhone guardar os dados sozinho, publique estes arquivos em uma hospedagem estática grátis com HTTPS, abra o link pelo Safari e escolha Adicionar à Tela de Início.</p>
+            <ol class="install-steps">
+              <li>Use uma opção gratuita como GitHub Pages, Cloudflare Pages ou Netlify para hospedar a pasta do sistema.</li>
+              <li>No Safari do iPhone, abra o endereço HTTPS publicado, como <strong>https://seu-usuario.github.io/planeta-locacoes/</strong>.</li>
+              <li>Toque em Compartilhar e depois em Adicionar à Tela de Início.</li>
+              <li>Abra pelo ícone Planeta Locações. Os cadastros ficam salvos neste iPhone.</li>
+            </ol>
+            <p class="muted-text">O servidor local e o endereço 127.0.0.1 servem apenas para testes no computador. Se já houver dados no computador, exporte um backup aqui e importe no iPhone depois da instalação.</p>
+          </section>
+
+          <section class="panel">
+            <h3>Exportar dados</h3>
+            <p>Salva estoque, clientes, locações, financeiro e configurações em um arquivo JSON.</p>
+            <button id="exportBackupBtn" class="primary-action" type="button">Exportar backup</button>
+            <p id="lastBackupInfo" class="muted-text"></p>
+          </section>
+
+          <section class="panel">
+            <h3>Importar dados</h3>
+            <p>Importa um backup JSON e permite escolher entre mesclar com os dados atuais ou substituir tudo com confirmação.</p>
+            <label class="file-picker">
+              Escolher arquivo JSON
+              <input id="importBackupInput" type="file" accept="application/json,.json">
+            </label>
+          </section>
+
+          <section class="panel danger-panel">
+            <h3>Limpar somente estoque</h3>
+            <p>Remove apenas os itens cadastrados no estoque deste aparelho. Clientes, locações e gastos continuam salvos.</p>
+            <button id="clearStockBtn" class="danger-action" type="button">Limpar estoque</button>
+          </section>
+
+          <section class="panel danger-panel">
+            <h3>Limpar dados</h3>
+            <p>Apaga todos os cadastros deste aparelho. Use apenas depois de exportar um backup.</p>
+            <button id="clearDataBtn" class="danger-action" type="button">Limpar tudo</button>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="modalRoot"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="db.js?v=16"></script>
+  <script src="app.js?v=16"></script>
+</body>
+</html>
