@@ -31,7 +31,7 @@
     "pending-expense": "Gasto pendente",
     "future-expense": "Gasto futuro",
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=19";
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=20";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -316,7 +316,7 @@
     const receivable = state.rentals
       .filter((rental) => !["returned", "cancelled"].includes(rental.status) && rental.paymentStatus !== "paid")
       .reduce((sum, rental) => sum + getRentalTotals(rental).remaining, 0);
-    const availableUnits = state.items.reduce((sum, item) => sum + getItemStats(item).available, 0);
+    const availableUnits = state.items.reduce((sum, item) => sum + getItemStats(item).availableToday, 0);
 
     $("#dashboardStats").innerHTML = [
       ["Locações ativas", activeRentals.length],
@@ -342,7 +342,7 @@
                   <strong>${escapeHtml(item.name)}</strong>
                   <span>${escapeHtml(item.category || "Sem categoria")}${item.color ? ` · ${escapeHtml(item.color)}` : ""}</span>
                 </div>
-                <strong>${stats.available}</strong>
+                  <strong>${stats.availableToday}</strong>
               </div>
             `;
           })
@@ -470,7 +470,7 @@
   function renderAlerts() {
     const alerts = state.items
       .map((item) => ({ item, stats: getItemStats(item) }))
-      .filter(({ stats }) => stats.available <= 2 || stats.unavailable > 0)
+      .filter(({ stats }) => stats.availableToday <= 2 || stats.unavailable > 0)
       .slice(0, 10);
 
     if (!alerts.length) {
@@ -482,9 +482,9 @@
         <div class="compact-item">
           <div>
             <strong>${escapeHtml(item.name)}</strong>
-            <span>${stats.available <= 2 ? "Disponibilidade baixa" : "Tem item indisponível"}</span>
+            <span>${stats.availableToday <= 2 ? "Disponibilidade baixa hoje" : "Tem item indisponível"}</span>
           </div>
-          <span>${stats.available} disp.</span>
+          <span>${stats.availableToday} hoje</span>
         </div>
       `)
       .join("");
@@ -540,9 +540,11 @@
         </div>
         <div class="metric-grid">
           <div class="metric"><span>Total</span><strong>${stats.total}</strong></div>
-          <div class="metric"><span>Disponível</span><strong>${stats.available}</strong></div>
-          <div class="metric"><span>Reservado</span><strong>${stats.reserved}</strong></div>
-          <div class="metric"><span>Alugado</span><strong>${stats.rented}</strong></div>
+          <div class="metric"><span>Disponível hoje</span><strong>${stats.availableToday}</strong></div>
+          <div class="metric"><span>Reservado hoje</span><strong>${stats.reservedToday}</strong></div>
+          <div class="metric"><span>Alugado hoje</span><strong>${stats.rentedToday}</strong></div>
+          <div class="metric"><span>Reservado futuro</span><strong>${stats.futureReserved}</strong></div>
+          <div class="metric"><span>Próxima reserva</span><strong>${stats.nextReservationDate ? formatDate(stats.nextReservationDate) : "-"}</strong></div>
           <div class="metric"><span>Devolvido</span><strong>${stats.returned}</strong></div>
           <div class="metric"><span>Indisponível</span><strong>${stats.unavailable}</strong></div>
         </div>
@@ -764,8 +766,7 @@
     container.innerHTML = state.currentRentalItems
       .map((line, index) => {
         const item = getItem(line.itemId);
-        const available = item && startDate && endDate ? getAvailableForPeriod(item, startDate, endDate, state.editingRentalId) : null;
-        const availabilityText = available === null ? "" : `<span class="badge ${available < line.qty ? "red" : "green"}">${available} disponível no período</span>`;
+        const availabilityText = getRentalLineAvailabilityText(item, line, startDate, endDate);
         const originText = line.originType === "kit" ? `<span class="badge">Origem: ${escapeHtml(line.originName || "Conjunto")}</span>` : "";
         return `
           <div class="line-card">
@@ -792,6 +793,25 @@
       .join("");
 
     renderRentalTotals();
+  }
+
+  function getRentalLineAvailabilityText(item, line, startDate, endDate) {
+    if (!item) {
+      return `<span class="badge red">Item não encontrado</span>`;
+    }
+
+    if (!startDate || !endDate) {
+      return `<span class="badge">Escolha as datas para ver a disponibilidade real</span>`;
+    }
+
+    if (endDate < startDate) {
+      return `<span class="badge red">Confira as datas da locação</span>`;
+    }
+
+    const available = getAvailableForPeriod(item, startDate, endDate, state.editingRentalId);
+    const total = Number(item.totalQty) || 0;
+    const isShort = available < (Number(line.qty) || 0);
+    return `<span class="badge ${isShort ? "red" : "green"}">Disponível no período selecionado: ${available} de ${total}</span>`;
   }
 
   function handleRentalLineInput(event) {
@@ -2906,53 +2926,110 @@
   }
 
   function getItemStats(item) {
+    const today = todayISO();
     const stats = {
       total: Number(item.totalQty) || 0,
       unavailable: Number(item.unavailableQty) || 0,
-      reserved: 0,
-      rented: 0,
+      reservedToday: 0,
+      rentedToday: 0,
+      futureReserved: 0,
+      nextReservationDate: "",
       returned: 0,
-      available: 0,
+      availableToday: 0,
     };
 
     state.rentals.forEach((rental) => {
-      rental.items
+      const rentalLines = (Array.isArray(rental.items) ? rental.items : [])
         .filter((line) => Number(line.itemId) === Number(item.id))
-        .forEach((line) => {
-          const qty = Number(line.qty) || 0;
-          if (rental.status === "reserved") {
-            stats.reserved += qty;
-          } else if (rental.status === "delivered") {
-            stats.rented += qty;
-          } else if (rental.status === "returned") {
-            stats.returned += qty;
-          }
-        });
+      rentalLines.forEach((line) => {
+        const qty = Number(line.qty) || 0;
+
+        if (rental.status === "reserved" && datesOverlap(today, today, rental.startDate, rental.endDate)) {
+          stats.reservedToday += qty;
+        } else if (rental.status === "delivered" && datesOverlap(today, today, rental.startDate, rental.endDate)) {
+          stats.rentedToday += qty;
+        } else if (rental.status === "returned") {
+          stats.returned += qty;
+        }
+
+      });
     });
 
-    stats.available = Math.max(0, stats.total - stats.unavailable - stats.reserved - stats.rented);
+    const future = getFutureReservationStats(item, today);
+    stats.futureReserved = future.qty;
+    stats.nextReservationDate = future.nextDate;
+    stats.availableToday = Math.max(0, stats.total - stats.unavailable - stats.reservedToday - stats.rentedToday);
     return stats;
   }
 
-  function getAvailableForPeriod(item, startDate, endDate, ignoreRentalId = null) {
-    const used = state.rentals.reduce((sum, rental) => {
-      if (ignoreRentalId && Number(rental.id) === Number(ignoreRentalId)) {
-        return sum;
-      }
-
-      if (!ACTIVE_STATUSES.includes(rental.status) || !datesOverlap(startDate, endDate, rental.startDate, rental.endDate)) {
-        return sum;
-      }
-
-      return (
-        sum +
-        rental.items
+  function getFutureReservationStats(item, today) {
+    const futureRentals = state.rentals
+      .filter((rental) => rental.status === "reserved" && rental.startDate > today)
+      .map((rental) => {
+        const qty = (Array.isArray(rental.items) ? rental.items : [])
           .filter((line) => Number(line.itemId) === Number(item.id))
-          .reduce((lineSum, line) => lineSum + (Number(line.qty) || 0), 0)
-      );
+          .reduce((sum, line) => sum + (Number(line.qty) || 0), 0);
+        return { rental, qty };
+      })
+      .filter((entry) => entry.qty > 0);
+
+    if (!futureRentals.length) {
+      return { qty: 0, nextDate: "" };
+    }
+
+    const dates = uniqueValues(futureRentals.map((entry) => entry.rental.startDate));
+    const peakQty = dates.reduce((highest, date) => {
+      const usedOnDate = futureRentals
+        .filter((entry) => datesOverlap(date, date, entry.rental.startDate, entry.rental.endDate))
+        .reduce((sum, entry) => sum + entry.qty, 0);
+      return Math.max(highest, usedOnDate);
     }, 0);
 
+    return { qty: peakQty, nextDate: dates[0] || "" };
+  }
+
+  function getAvailableForPeriod(item, startDate, endDate, ignoreRentalId = null) {
+    const used = getItemPeriodConflicts(item, startDate, endDate, ignoreRentalId)
+      .reduce((sum, conflict) => sum + conflict.qty, 0);
+
     return Math.max(0, (Number(item.totalQty) || 0) - (Number(item.unavailableQty) || 0) - used);
+  }
+
+  function getItemPeriodConflicts(item, startDate, endDate, ignoreRentalId = null) {
+    if (!item || !startDate || !endDate || endDate < startDate) {
+      return [];
+    }
+
+    return state.rentals
+      .filter((rental) => {
+        if (ignoreRentalId && Number(rental.id) === Number(ignoreRentalId)) {
+          return false;
+        }
+
+        return ACTIVE_STATUSES.includes(rental.status) && datesOverlap(startDate, endDate, rental.startDate, rental.endDate);
+      })
+      .map((rental) => {
+        const qty = (Array.isArray(rental.items) ? rental.items : [])
+          .filter((line) => Number(line.itemId) === Number(item.id))
+          .reduce((lineSum, line) => lineSum + (Number(line.qty) || 0), 0);
+        return { rental, qty };
+      })
+      .filter((conflict) => conflict.qty > 0);
+  }
+
+  function formatPeriodConflictSummary(item, startDate, endDate, ignoreRentalId = null) {
+    const conflicts = getItemPeriodConflicts(item, startDate, endDate, ignoreRentalId);
+    if (!conflicts.length) {
+      return "";
+    }
+
+    return conflicts
+      .slice(0, 3)
+      .map(({ rental, qty }) => {
+        const client = getClient(rental.clientId);
+        return `${qty} ${item.name} em ${statusLabel(rental.status).toLowerCase()} entre ${formatDate(rental.startDate)} e ${formatDate(rental.endDate)}${client ? ` (${client.name})` : ""}`;
+      })
+      .join("; ");
   }
 
   function checkRentalAvailability(rental, ignoreRentalId = null) {
@@ -2975,7 +3052,10 @@
 
       const available = getAvailableForPeriod(item, rental.startDate, rental.endDate, ignoreRentalId);
       if (qty > available) {
-        shortages.push(`${item.name}: pedido ${qty}, disponível ${available}.`);
+        const conflicts = formatPeriodConflictSummary(item, rental.startDate, rental.endDate, ignoreRentalId);
+        shortages.push(
+          `${item.name}: pedido ${qty}, disponível ${available} de ${Number(item.totalQty) || 0} no período.${conflicts ? ` Já existem ${conflicts}.` : ""}`
+        );
       }
     });
 
@@ -3003,7 +3083,10 @@
 
       const available = getAvailableForPeriod(item, startDate, endDate, state.editingRentalId);
       if (qty > available) {
-        shortages.push(`${item.name}: pedido ${qty}, disponível ${available}.`);
+        const conflicts = formatPeriodConflictSummary(item, startDate, endDate, state.editingRentalId);
+        shortages.push(
+          `${item.name}: pedido ${qty}, disponível ${available} de ${Number(item.totalQty) || 0} no período.${conflicts ? ` Já existem ${conflicts}.` : ""}`
+        );
       }
     });
 
