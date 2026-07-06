@@ -31,7 +31,7 @@
     "pending-expense": "Gasto pendente",
     "future-expense": "Gasto futuro",
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=18";
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=19";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -56,6 +56,7 @@
     editingRentalId: null,
     deferredInstallPrompt: null,
     contractTemplate: null,
+    stockViewMode: "detailed",
   };
 
   const moneyFormatter = new Intl.NumberFormat("pt-BR", {
@@ -74,6 +75,7 @@
       await PlanetaDB.seedIfEmpty();
       await removeSeededDemoDataIfSafe();
       await migrateFinanceData();
+      await loadPreferences();
       bindEvents();
       await loadAll();
       startNewRental();
@@ -103,6 +105,12 @@
     $("#stockSearch").addEventListener("input", renderStock);
     $("#stockCategoryFilter").addEventListener("change", renderStock);
     $("#stockColorFilter").addEventListener("change", renderStock);
+    $("#stockViewToggle").checked = state.stockViewMode === "detailed";
+    $("#stockViewToggle").addEventListener("change", async (event) => {
+      state.stockViewMode = event.currentTarget.checked ? "detailed" : "simple";
+      await PlanetaDB.setMeta("stockViewMode", state.stockViewMode);
+      renderStock();
+    });
     $("#clientsSearch").addEventListener("input", renderClients);
     $("#rentalsSearch").addEventListener("input", renderRentals);
     $("#rentalStatusFilter").addEventListener("change", renderRentals);
@@ -176,6 +184,11 @@
     state.rentals = rentals.sort((a, b) => Number(b.orderNumber) - Number(a.orderNumber));
     state.expenses = expenses.map(normalizeStoredExpense).sort((a, b) => String(getExpenseDate(b)).localeCompare(String(getExpenseDate(a))));
     state.kits = kits.sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
+  }
+
+  async function loadPreferences() {
+    const stockViewMode = await PlanetaDB.getMeta("stockViewMode", "detailed");
+    state.stockViewMode = stockViewMode === "simple" ? "simple" : "detailed";
   }
 
   async function removeSeededDemoDataIfSafe() {
@@ -296,10 +309,10 @@
   }
 
   function renderDashboard() {
-    const today = todayISO();
     const activeRentals = state.rentals.filter((rental) => ACTIVE_STATUSES.includes(rental.status));
-    const deliveriesToday = state.rentals.filter((rental) => rental.status === "reserved" && rental.startDate === today);
-    const returnsToday = state.rentals.filter((rental) => rental.status === "delivered" && rental.endDate === today);
+    const scheduleEntries = getScheduleEntries(3);
+    const upcomingStarts = scheduleEntries.filter((entry) => entry.actionType === "start").length;
+    const upcomingEnds = scheduleEntries.filter((entry) => entry.actionType === "end").length;
     const receivable = state.rentals
       .filter((rental) => !["returned", "cancelled"].includes(rental.status) && rental.paymentStatus !== "paid")
       .reduce((sum, rental) => sum + getRentalTotals(rental).remaining, 0);
@@ -307,15 +320,16 @@
 
     $("#dashboardStats").innerHTML = [
       ["Locações ativas", activeRentals.length],
-      ["Entregar hoje", deliveriesToday.length],
-      ["Retirar hoje", returnsToday.length],
+      ["Entregar/retirar 3 dias", upcomingStarts],
+      ["Buscar/devolver 3 dias", upcomingEnds],
       ["Valor a receber", formatMoney(receivable)],
       ["Itens disponíveis", availableUnits],
     ]
       .map(([label, value]) => `<article class="kpi-card"><span>${label}</span><strong>${value}</strong></article>`)
       .join("");
 
-    $("#todayList").innerHTML = renderTodayList(deliveriesToday, returnsToday);
+    $("#todayList").innerHTML = renderUpcomingAgenda(scheduleEntries);
+    $("#reservationReminders").innerHTML = renderReservationReminders(scheduleEntries);
     $("#dashboardAlerts").innerHTML = renderAlerts();
     $("#inventorySummary").innerHTML = state.items.length
       ? state.items
@@ -336,36 +350,121 @@
       : emptyState("Cadastre os primeiros itens para ver a disponibilidade.");
   }
 
-  function renderTodayList(deliveriesToday, returnsToday) {
-    const rows = [];
+  function getScheduleEntries(days = 3) {
+    const today = todayISO();
+    const dates = Array.from({ length: days }, (_, index) => addDaysToISODate(today, index));
+    const dateSet = new Set(dates);
+    const entries = [];
 
-    deliveriesToday.forEach((rental) => {
-      const client = getClient(rental.clientId);
-      rows.push(`
-        <div class="compact-item">
-          <div>
-            <strong>Entregar pedido ${escapeHtml(rental.orderNumber)}</strong>
-            <span>${escapeHtml(client?.name || "Cliente não encontrado")}</span>
-          </div>
-          <span>${formatMoney(getRentalTotals(rental).total)}</span>
-        </div>
-      `);
+    state.rentals.forEach((rental) => {
+      if (["quote", "cancelled", "returned"].includes(rental.status)) {
+        return;
+      }
+
+      if (rental.status === "reserved" && dateSet.has(rental.startDate)) {
+        entries.push(buildScheduleEntry(rental, rental.startDate, "start"));
+      }
+
+      if (["reserved", "delivered"].includes(rental.status) && dateSet.has(rental.endDate)) {
+        entries.push(buildScheduleEntry(rental, rental.endDate, "end"));
+      }
     });
 
-    returnsToday.forEach((rental) => {
-      const client = getClient(rental.clientId);
-      rows.push(`
-        <div class="compact-item">
-          <div>
-            <strong>Retirar pedido ${escapeHtml(rental.orderNumber)}</strong>
-            <span>${escapeHtml(client?.name || "Cliente não encontrado")}</span>
+    return entries.sort((a, b) => {
+      const dateCompare = String(a.date).localeCompare(String(b.date));
+      if (dateCompare) {
+        return dateCompare;
+      }
+      return Number(a.rental.orderNumber || 0) - Number(b.rental.orderNumber || 0);
+    });
+  }
+
+  function buildScheduleEntry(rental, date, actionType) {
+    const client = getClient(rental.clientId);
+    return {
+      rental,
+      client,
+      date,
+      actionType,
+      actionLabel: getScheduleActionLabel(rental, actionType),
+      itemText: getRentalItemSummary(rental),
+    };
+  }
+
+  function renderUpcomingAgenda(entries) {
+    const dates = Array.from({ length: 3 }, (_, index) => addDaysToISODate(todayISO(), index));
+    const sections = dates.map((date) => {
+      const dayEntries = entries.filter((entry) => entry.date === date);
+      return `
+        <div class="agenda-day">
+          <div class="agenda-day-head">
+            <strong>${escapeHtml(getRelativeDateLabel(date))}</strong>
+            <span>${formatDate(date)}</span>
           </div>
-          <span>${formatMoney(getRentalTotals(rental).total)}</span>
+          <div class="compact-list">
+            ${dayEntries.length ? dayEntries.map(renderScheduleEntry).join("") : emptyState("Nenhuma reserva nesta data.")}
+          </div>
         </div>
-      `);
+      `;
     });
 
-    return rows.length ? rows.join("") : emptyState("Nada marcado para hoje.");
+    return sections.join("");
+  }
+
+  function renderReservationReminders(entries) {
+    const reminders = entries.slice(0, 8);
+    if (!reminders.length) {
+      return emptyState("Nenhuma entrega, busca ou devolução nos próximos 3 dias.");
+    }
+
+    return reminders
+      .map((entry) => {
+        const isToday = entry.date === todayISO();
+        return `
+          <div class="compact-item reminder-item ${isToday ? "today" : ""}">
+            <div>
+              <strong>${escapeHtml(entry.actionLabel)} - pedido ${escapeHtml(entry.rental.orderNumber)}</strong>
+              <span>${formatDate(entry.date)} · ${escapeHtml(entry.client?.name || "Cliente não encontrado")}</span>
+              <span>${escapeHtml(entry.itemText)}</span>
+            </div>
+            <span>${isToday ? "Hoje" : statusLabel(entry.rental.status)}</span>
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  function renderScheduleEntry(entry) {
+    return `
+      <div class="compact-item agenda-item">
+        <div>
+          <strong>${escapeHtml(entry.actionLabel)} - pedido ${escapeHtml(entry.rental.orderNumber)}</strong>
+          <span>${escapeHtml(entry.client?.name || "Cliente não encontrado")} · ${escapeHtml(entry.itemText)}</span>
+          <span>Entrega/retirada: ${formatDate(entry.rental.startDate)} · Devolução/busca: ${formatDate(entry.rental.endDate)}</span>
+          <span>Status: ${statusLabel(entry.rental.status)} · Pagamento: ${PAYMENT_STATUS[entry.rental.paymentStatus] || entry.rental.paymentStatus || "-"}</span>
+        </div>
+        <span>${formatMoney(getRentalTotals(entry.rental).total)}</span>
+      </div>
+    `;
+  }
+
+  function getScheduleActionLabel(rental, actionType) {
+    if (actionType === "start") {
+      return "Entregar/retirar";
+    }
+
+    return rental.status === "reserved" ? "Devolução prevista" : "Buscar/devolver";
+  }
+
+  function getRentalItemSummary(rental) {
+    const lines = Array.isArray(rental.items) ? rental.items : [];
+    if (!lines.length) {
+      return "Sem itens";
+    }
+
+    const visible = lines.slice(0, 2).map((line) => `${line.qty}x ${line.name}`);
+    const remaining = lines.length - visible.length;
+    return remaining > 0 ? `${visible.join(", ")} +${remaining}` : visible.join(", ");
   }
 
   function renderAlerts() {
@@ -400,12 +499,29 @@
     const search = normalize($("#stockSearch").value);
     const category = $("#stockCategoryFilter").value;
     const color = $("#stockColorFilter").value;
-    const items = state.items.filter((item) => {
-      const text = normalize(`${item.name} ${item.category} ${item.color} ${item.notes}`);
-      return (!search || text.includes(search)) && (!category || item.category === category) && (!color || item.color === color);
-    });
+    const items = state.items
+      .filter((item) => {
+        const text = normalize(`${item.name} ${item.category} ${item.color} ${item.notes}`);
+        return (!search || text.includes(search)) && (!category || item.category === category) && (!color || item.color === color);
+      })
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
 
+    if (state.stockViewMode === "simple") {
+      $("#stockList").classList.add("stock-simple-list");
+      $("#stockList").innerHTML = items.length ? items.map(renderStockNameCard).join("") : emptyState("Nenhum item encontrado.");
+      return;
+    }
+
+    $("#stockList").classList.remove("stock-simple-list");
     $("#stockList").innerHTML = items.length ? items.map(renderItemCard).join("") : emptyState("Nenhum item encontrado.");
+  }
+
+  function renderStockNameCard(item) {
+    return `
+      <article class="stock-name-card">
+        <strong>${escapeHtml(item.name)}</strong>
+      </article>
+    `;
   }
 
   function renderItemCard(item) {
@@ -3099,6 +3215,27 @@
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
     return now.toISOString().slice(0, 10);
+  }
+
+  function addDaysToISODate(value, daysToAdd) {
+    const [year, month, day] = value.split("-").map(Number);
+    const date = new Date(year, month - 1, day || 1);
+    date.setDate(date.getDate() + daysToAdd);
+    date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+    return date.toISOString().slice(0, 10);
+  }
+
+  function getRelativeDateLabel(value) {
+    const today = todayISO();
+    if (value === today) {
+      return "Hoje";
+    }
+
+    if (value === addDaysToISODate(today, 1)) {
+      return "Amanhã";
+    }
+
+    return "Depois de amanhã";
   }
 
   function formatDate(value) {

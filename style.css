@@ -334,6 +334,59 @@ main {
   grid-template-columns: 1fr;
 }
 
+.stock-view-toggle {
+  align-self: end;
+}
+
+.switch-control {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 52px auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  color: var(--text);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.switch-control input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.switch-track {
+  position: relative;
+  width: 52px;
+  height: 30px;
+  background: #dbe3ef;
+  border: 1px solid #c2cede;
+  border-radius: 999px;
+}
+
+.switch-track::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(23, 32, 51, 0.2);
+  transition: transform 160ms ease;
+}
+
+.switch-control input:checked + .switch-track {
+  background: var(--blue);
+  border-color: var(--blue);
+}
+
+.switch-control input:checked + .switch-track::after {
+  transform: translateX(22px);
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -368,6 +421,25 @@ textarea:focus {
 .data-list {
   display: grid;
   gap: 12px;
+}
+
+.stock-simple-list {
+  grid-template-columns: 1fr;
+}
+
+.stock-name-card {
+  min-height: 48px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.stock-name-card strong {
+  display: block;
+  color: var(--blue-dark);
+  overflow-wrap: anywhere;
 }
 
 .data-card {
@@ -502,6 +574,51 @@ textarea:focus {
 .inventory-pill span {
   color: var(--muted);
   font-size: 0.85rem;
+}
+
+.agenda-day {
+  display: grid;
+  gap: 8px;
+}
+
+.agenda-day + .agenda-day {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.agenda-day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--blue-dark);
+}
+
+.agenda-day-head span {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.agenda-item,
+.reminder-item {
+  align-items: flex-start;
+}
+
+.agenda-item div,
+.reminder-item div {
+  min-width: 0;
+}
+
+.agenda-item div span,
+.reminder-item div span {
+  display: block;
+  margin-top: 2px;
+}
+
+.reminder-item.today {
+  background: #fff7e8;
+  border-color: #f3d49b;
 }
 
 .form-panel {
@@ -816,11 +933,15 @@ body.modal-open {
   }
 
   .toolbar {
-    grid-template-columns: 1.5fr 1fr 1fr;
+    grid-template-columns: minmax(220px, 1.4fr) minmax(150px, 0.9fr) minmax(150px, 0.9fr) minmax(220px, auto);
   }
 
   .data-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stock-simple-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .rentals-list {
@@ -863,6 +984,10 @@ body.modal-open {
 
   .metric-grid {
     grid-template-columns: 1fr;
+  }
+
+  .switch-control {
+    grid-template-columns: 1fr 52px 1fr;
   }
 
   .form-actions {
