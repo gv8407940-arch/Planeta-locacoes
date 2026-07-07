@@ -3,7 +3,7 @@
   "short_name": "Planeta",
   "description": "Sistema local para controle de estoque, clientes, locações, pagamentos e recibos da Planeta Locações.",
   "id": "./",
-  "start_url": "./index.html?v=20",
+  "start_url": "./index.html?v=22",
   "scope": "./",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],

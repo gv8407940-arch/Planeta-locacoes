@@ -442,6 +442,21 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
+.clickable-item {
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.clickable-item:hover,
+.clickable-item:focus-visible {
+  border-color: var(--blue);
+  box-shadow: 0 10px 28px rgba(11, 78, 162, 0.12);
+}
+
+.clickable-item:focus-visible {
+  outline: 3px solid rgba(11, 78, 162, 0.18);
+}
+
 .data-card {
   padding: 14px;
 }
@@ -492,6 +507,11 @@ textarea:focus {
 .badge.green {
   color: var(--success);
   background: #edf9f1;
+}
+
+.badge.blue {
+  color: var(--blue-dark);
+  background: #eef4ff;
 }
 
 .badge.yellow {
@@ -621,6 +641,89 @@ textarea:focus {
   border-color: #f3d49b;
 }
 
+.status-board-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.status-board {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  background: #f8fbff;
+  border: 1px solid #dbe8fa;
+  border-radius: 8px;
+}
+
+.status-board-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0;
+  color: var(--blue-dark);
+  background: transparent;
+  border: 0;
+  font-weight: 900;
+  text-align: left;
+}
+
+.status-board-title small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.status-rental-item {
+  align-items: flex-start;
+}
+
+.rental-summary-card {
+  min-height: 92px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.rental-summary-card h3 {
+  margin: 0;
+  color: var(--blue-dark);
+  font-size: 1.05rem;
+}
+
+.rental-summary-card p {
+  margin: 5px 0 8px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.rental-detail-modal {
+  display: grid;
+  gap: 12px;
+}
+
+.detail-section {
+  display: grid;
+  gap: 8px;
+}
+
+.detail-section h4 {
+  margin: 0;
+  color: var(--blue-dark);
+}
+
+.rental-detail-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+.rental-detail-actions button {
+  min-height: 44px;
+}
+
 .form-panel {
   padding: 14px;
 }
@@ -660,6 +763,101 @@ textarea:focus {
   display: grid;
   gap: 10px;
   margin-top: 12px;
+}
+
+.switch-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 42px;
+  padding: 8px 10px;
+  color: var(--blue-dark);
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-weight: 800;
+}
+
+.switch-label input {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--blue);
+}
+
+.daily-pricing-editor {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.daily-pricing-note,
+.daily-row {
+  padding: 10px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.daily-pricing-note span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.daily-row-head,
+.daily-day-foot,
+.check-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.daily-row-head span,
+.daily-day-foot span {
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.daily-days {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.daily-day-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  background: #f7f9fc;
+  border: 1px solid #e7edf6;
+  border-radius: 8px;
+}
+
+.check-row {
+  justify-content: flex-start;
+  min-height: auto;
+  padding: 0;
+  font-weight: 800;
+}
+
+.check-row input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--blue);
+}
+
+.daily-day-foot button {
+  min-height: 34px;
+  padding: 0 10px;
+  color: var(--blue-dark);
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-weight: 800;
 }
 
 .line-card {
@@ -764,6 +962,7 @@ textarea:focus {
   padding: 20px 12px;
   overflow: auto;
   background: rgba(9, 18, 36, 0.55);
+  backdrop-filter: blur(2px);
 }
 
 .modal-card {
@@ -789,6 +988,55 @@ textarea:focus {
 
 .modal-body {
   padding: 14px;
+}
+
+.item-detail-modal {
+  display: grid;
+  gap: 12px;
+}
+
+.item-detail-tabs {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tab-btn {
+  min-height: 42px;
+  padding: 0 10px;
+  color: var(--blue-dark);
+  background: #eef4ff;
+  border: 1px solid #d6e5fb;
+  border-radius: 8px;
+  font-weight: 900;
+}
+
+.tab-btn.active {
+  color: #ffffff;
+  background: var(--blue);
+  border-color: var(--blue);
+}
+
+.item-tab-panel.hidden {
+  display: none;
+}
+
+.detail-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detail-note {
+  margin-top: 10px;
+  padding: 10px;
+  background: #f7f9fc;
+  border: 1px solid #e7edf6;
+  border-radius: 8px;
+}
+
+.item-history-row {
+  align-items: flex-start;
 }
 
 .contract-preview-wrap {
@@ -940,12 +1188,20 @@ body.modal-open {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .status-board-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .stock-simple-list {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .rentals-list {
     grid-template-columns: 1fr;
+  }
+
+  .rental-detail-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .form-grid {
@@ -960,6 +1216,14 @@ body.modal-open {
   .line-card {
     grid-template-columns: 1fr 260px auto;
     align-items: end;
+  }
+
+  .daily-days {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .item-detail-tabs {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .receipt-grid,
@@ -984,6 +1248,19 @@ body.modal-open {
 
   .metric-grid {
     grid-template-columns: 1fr;
+  }
+
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-backdrop {
+    padding: 8px;
+  }
+
+  .modal-card {
+    max-height: calc(100vh - 16px);
+    overflow: auto;
   }
 
   .switch-control {

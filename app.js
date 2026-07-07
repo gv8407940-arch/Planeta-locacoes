@@ -31,7 +31,8 @@
     "pending-expense": "Gasto pendente",
     "future-expense": "Gasto futuro",
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=20";
+  const DASHBOARD_STATUS_ORDER = ["reserved", "delivered", "returned", "cancelled"];
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=22";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -57,6 +58,8 @@
     deferredInstallPrompt: null,
     contractTemplate: null,
     stockViewMode: "detailed",
+    dailyPricingEnabled: false,
+    dailyPricingRows: [],
   };
 
   const moneyFormatter = new Intl.NumberFormat("pt-BR", {
@@ -126,10 +129,16 @@
     $("#financeTypeFilter").addEventListener("change", renderFinance);
     $("#financeCategoryFilter").addEventListener("change", renderFinance);
 
+    $("#inventorySummary").addEventListener("click", handleItemSurfaceClick);
+    $("#inventorySummary").addEventListener("keydown", handleItemSurfaceKeydown);
+    $("#dashboardStatusBoards").addEventListener("click", handleDashboardStatusClick);
+    $("#dashboardStatusBoards").addEventListener("keydown", handleDashboardStatusKeydown);
     $("#stockList").addEventListener("click", handleStockClick);
+    $("#stockList").addEventListener("keydown", handleItemSurfaceKeydown);
     $("#kitsList").addEventListener("click", handleKitClick);
     $("#clientsList").addEventListener("click", handleClientClick);
     $("#rentalsList").addEventListener("click", handleRentalClick);
+    $("#rentalsList").addEventListener("keydown", handleRentalKeydown);
     $("#expenseList").addEventListener("click", handleExpenseClick);
     $("#financeList").addEventListener("click", handleFinanceClick);
 
@@ -145,11 +154,15 @@
     $("#addRentalKitBtn").addEventListener("click", addCurrentRentalKit);
     $("#rentalItemsEditor").addEventListener("input", handleRentalLineInput);
     $("#rentalItemsEditor").addEventListener("click", handleRentalLineClick);
+    $("#rentalDailyPricingToggle").addEventListener("change", handleDailyPricingToggle);
+    $("#dailyPricingEditor").addEventListener("input", handleDailyPricingInput);
+    $("#dailyPricingEditor").addEventListener("change", handleDailyPricingInput);
+    $("#dailyPricingEditor").addEventListener("click", handleDailyPricingClick);
     $("#rentalDiscount").addEventListener("input", renderRentalTotals);
     $("#rentalFreight").addEventListener("input", renderRentalTotals);
     $("#rentalDeposit").addEventListener("input", renderRentalTotals);
-    $("#rentalStartDate").addEventListener("change", renderRentalItemsEditor);
-    $("#rentalEndDate").addEventListener("change", renderRentalItemsEditor);
+    $("#rentalStartDate").addEventListener("change", handleRentalDateChange);
+    $("#rentalEndDate").addEventListener("change", handleRentalDateChange);
     $("#rentalClientCpf").addEventListener("blur", handleRentalCpfLookup);
     $("#rentalClientCpf").addEventListener("input", () => {
       $("#rentalClientId").value = "";
@@ -309,7 +322,7 @@
   }
 
   function renderDashboard() {
-    const activeRentals = state.rentals.filter((rental) => ACTIVE_STATUSES.includes(rental.status));
+    const activeRentals = state.rentals.filter(isActiveRental);
     const scheduleEntries = getScheduleEntries(3);
     const upcomingStarts = scheduleEntries.filter((entry) => entry.actionType === "start").length;
     const upcomingEnds = scheduleEntries.filter((entry) => entry.actionType === "end").length;
@@ -331,13 +344,14 @@
     $("#todayList").innerHTML = renderUpcomingAgenda(scheduleEntries);
     $("#reservationReminders").innerHTML = renderReservationReminders(scheduleEntries);
     $("#dashboardAlerts").innerHTML = renderAlerts();
+    $("#dashboardStatusBoards").innerHTML = renderDashboardStatusBoards();
     $("#inventorySummary").innerHTML = state.items.length
       ? state.items
           .slice(0, 12)
           .map((item) => {
             const stats = getItemStats(item);
             return `
-              <div class="inventory-pill">
+              <div class="inventory-pill clickable-item" role="button" tabindex="0" data-item-id="${item.id}">
                 <div>
                   <strong>${escapeHtml(item.name)}</strong>
                   <span>${escapeHtml(item.category || "Sem categoria")}${item.color ? ` · ${escapeHtml(item.color)}` : ""}</span>
@@ -490,6 +504,73 @@
       .join("");
   }
 
+  function renderDashboardStatusBoards() {
+    return DASHBOARD_STATUS_ORDER.map((status) => {
+      const rentals = sortRentalsByDateDesc(state.rentals.filter((rental) => rental.status === status)).slice(0, 10);
+      return `
+        <section class="status-board">
+          <button class="status-board-title" type="button" data-dashboard-status="${status}">
+            <span>${statusLabel(status)}</span>
+            <small>Ver todas</small>
+          </button>
+          <div class="compact-list">
+            ${rentals.length ? rentals.map(renderDashboardStatusRental).join("") : emptyState("Nenhuma locacao neste status.")}
+          </div>
+        </section>
+      `;
+    }).join("");
+  }
+
+  function renderDashboardStatusRental(rental) {
+    const client = getClient(rental.clientId);
+    const totals = getRentalTotals(rental);
+    return `
+      <div class="compact-item status-rental-item clickable-item" role="button" tabindex="0" data-rental-id="${rental.id}">
+        <div>
+          <strong>${escapeHtml(client?.name || "Cliente nao encontrado")}</strong>
+          <span>${formatDate(rental.startDate)} ate ${formatDate(rental.endDate)}</span>
+        </div>
+        <span>${formatMoney(totals.total)}</span>
+      </div>
+    `;
+  }
+
+  function handleDashboardStatusClick(event) {
+    const statusButton = event.target.closest("[data-dashboard-status]");
+    if (statusButton) {
+      $("#rentalStatusFilter").value = statusButton.dataset.dashboardStatus;
+      $("#rentalDateFilter").value = "";
+      renderRentals();
+      showView("rentals");
+      return;
+    }
+
+    const rentalElement = event.target.closest("[data-rental-id]");
+    if (rentalElement) {
+      const rental = getRental(Number(rentalElement.dataset.rentalId));
+      if (rental) {
+        openRentalDetailsModal(rental);
+      }
+    }
+  }
+
+  function handleDashboardStatusKeydown(event) {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+
+    const rentalElement = event.target.closest("[data-rental-id]");
+    if (!rentalElement) {
+      return;
+    }
+
+    event.preventDefault();
+    const rental = getRental(Number(rentalElement.dataset.rentalId));
+    if (rental) {
+      openRentalDetailsModal(rental);
+    }
+  }
+
   function renderStockFilters() {
     fillSelect($("#stockCategoryFilter"), uniqueValues(state.items.map((item) => item.category)), "Todas");
     fillSelect($("#stockColorFilter"), uniqueValues(state.items.map((item) => item.color).filter(Boolean)), "Todas");
@@ -518,7 +599,7 @@
 
   function renderStockNameCard(item) {
     return `
-      <article class="stock-name-card">
+      <article class="stock-name-card clickable-item" role="button" tabindex="0" data-item-id="${item.id}">
         <strong>${escapeHtml(item.name)}</strong>
       </article>
     `;
@@ -527,7 +608,7 @@
   function renderItemCard(item) {
     const stats = getItemStats(item);
     return `
-      <article class="data-card">
+      <article class="data-card clickable-item" role="button" tabindex="0" data-item-id="${item.id}">
         <div class="card-top">
           <div>
             <h3 class="card-title">${escapeHtml(item.name)}</h3>
@@ -647,6 +728,8 @@
   function startNewRental() {
     state.editingRentalId = null;
     state.currentRentalItems = [];
+    state.dailyPricingEnabled = false;
+    state.dailyPricingRows = [];
     $("#rentalId").value = "";
     $("#rentalClientId").value = "";
     $("#newRentalTitle").textContent = "Nova locação";
@@ -661,6 +744,8 @@
     $("#rentalPaymentMethod").value = "Pix";
     $("#rentalPaymentStatus").value = "unpaid";
     $("#rentalStatus").value = "quote";
+    $("#rentalDailyPricingToggle").checked = false;
+    renderDailyPricingEditor();
     renderRentalItemsEditor();
     renderRentalTotals();
   }
@@ -755,6 +840,9 @@
       return;
     }
 
+    syncDailyPricingRows();
+    renderDailyPricingEditor();
+
     if (!state.currentRentalItems.length) {
       container.innerHTML = emptyState("Adicione pelo menos um item.");
       renderRentalTotals();
@@ -824,6 +912,8 @@
 
     const value = field === "qty" ? Math.max(1, toNumber(event.target.value)) : Math.max(0, toNumber(event.target.value));
     state.currentRentalItems[index][field] = value;
+    syncDailyPricingRows();
+    renderDailyPricingEditor();
     renderRentalTotals();
   }
 
@@ -837,16 +927,279 @@
     renderRentalItemsEditor();
   }
 
+  function handleRentalDateChange() {
+    syncDailyPricingRows();
+    renderRentalItemsEditor();
+    renderDailyPricingEditor();
+    renderRentalTotals();
+  }
+
+  function handleDailyPricingToggle(event) {
+    state.dailyPricingEnabled = event.currentTarget.checked;
+    syncDailyPricingRows();
+    renderDailyPricingEditor();
+    renderRentalTotals();
+  }
+
+  function renderDailyPricingEditor() {
+    const container = $("#dailyPricingEditor");
+    if (!container) {
+      return;
+    }
+
+    container.hidden = !state.dailyPricingEnabled;
+    if (!state.dailyPricingEnabled) {
+      container.innerHTML = "";
+      return;
+    }
+
+    if (!state.currentRentalItems.length) {
+      container.innerHTML = emptyState("Adicione itens ou conjuntos para configurar as diarias.");
+      return;
+    }
+
+    const startDate = $("#rentalStartDate").value;
+    const endDate = $("#rentalEndDate").value;
+    if (!startDate || !endDate || endDate < startDate) {
+      container.innerHTML = emptyState("Escolha datas validas para configurar a cobranca por dias.");
+      return;
+    }
+
+    syncDailyPricingRows();
+    const rows = state.dailyPricingRows.map((row, rowIndex) => {
+      const rowTotal = getDailyPricingRowTotal(row);
+      return `
+        <div class="daily-row">
+          <div class="daily-row-head">
+            <div>
+              <strong>${escapeHtml(row.label)}</strong>
+              <span>${escapeHtml(row.qty)} ${escapeHtml(row.unitLabel || "unidade")}(s)</span>
+            </div>
+            <strong>${formatMoney(rowTotal)}</strong>
+          </div>
+          <div class="daily-days">
+            ${row.days
+              .map((day, dayIndex) => {
+                const dayTotal = day.charge ? roundMoney(row.qty * toNumber(day.unitPrice)) : 0;
+                return `
+                  <div class="daily-day-card">
+                    <label class="check-row">
+                      <input type="checkbox" ${day.charge ? "checked" : ""} data-daily-field="charge" data-row-index="${rowIndex}" data-day-index="${dayIndex}">
+                      <span>Cobrar ${formatDate(day.date)}</span>
+                    </label>
+                    <label>
+                      Valor por ${escapeHtml(row.unitLabel || "unidade")}
+                      <input type="number" min="0" step="0.01" inputmode="decimal" value="${escapeAttr(day.unitPrice)}" data-daily-field="unitPrice" data-row-index="${rowIndex}" data-day-index="${dayIndex}">
+                    </label>
+                    <div class="daily-day-foot">
+                      <span>${formatMoney(dayTotal)}</span>
+                      <button type="button" data-action="copy-daily-price" data-row-index="${rowIndex}" data-day-index="${dayIndex}">Aplicar proximos</button>
+                    </div>
+                  </div>
+                `;
+              })
+              .join("")}
+          </div>
+        </div>
+      `;
+    });
+
+    container.innerHTML = `
+      <div class="daily-pricing-note">
+        <strong>Subtotal das diarias: ${formatMoney(getDailyPricingSubtotal(getCurrentDailyPricingPayload()))}</strong>
+        <span>Desative dias que nao serao cobrados ou ajuste os valores manualmente.</span>
+      </div>
+      ${rows.join("")}
+    `;
+  }
+
+  function handleDailyPricingInput(event) {
+    const field = event.target.dataset.dailyField;
+    if (!field) {
+      return;
+    }
+
+    const row = state.dailyPricingRows[Number(event.target.dataset.rowIndex)];
+    const day = row?.days?.[Number(event.target.dataset.dayIndex)];
+    if (!row || !day) {
+      return;
+    }
+
+    if (field === "charge") {
+      day.charge = event.target.checked;
+      renderDailyPricingEditor();
+    } else if (field === "unitPrice") {
+      day.unitPrice = Math.max(0, toNumber(event.target.value));
+    }
+
+    renderRentalTotals();
+  }
+
+  function handleDailyPricingClick(event) {
+    const button = event.target.closest("button[data-action='copy-daily-price']");
+    if (!button) {
+      return;
+    }
+
+    const row = state.dailyPricingRows[Number(button.dataset.rowIndex)];
+    const sourceDay = row?.days?.[Number(button.dataset.dayIndex)];
+    if (!row || !sourceDay) {
+      return;
+    }
+
+    row.days.forEach((day, index) => {
+      if (index > Number(button.dataset.dayIndex)) {
+        day.unitPrice = Math.max(0, toNumber(sourceDay.unitPrice));
+        day.charge = sourceDay.charge !== false;
+      }
+    });
+
+    renderDailyPricingEditor();
+    renderRentalTotals();
+  }
+
+  function syncDailyPricingRows() {
+    if (!state.dailyPricingEnabled) {
+      state.dailyPricingRows = [];
+      return;
+    }
+
+    const dates = getRentalDateRange($("#rentalStartDate").value, $("#rentalEndDate").value);
+    const sourceRows = buildDailyPricingSourceRows();
+    if (!dates.length || !sourceRows.length) {
+      state.dailyPricingRows = [];
+      return;
+    }
+
+    const previousRows = new Map(state.dailyPricingRows.map((row) => [row.key, row]));
+    state.dailyPricingRows = sourceRows.map((source) => {
+      const previous = previousRows.get(source.key);
+      const previousDays = new Map((previous?.days || []).map((day) => [day.date, day]));
+      const fallbackDay = previous?.days?.[previous.days.length - 1];
+      const fallbackPrice = fallbackDay ? toNumber(fallbackDay.unitPrice) : source.defaultUnitPrice;
+
+      return {
+        ...source,
+        days: dates.map((date) => {
+          const previousDay = previousDays.get(date);
+          return {
+            date,
+            charge: previousDay ? previousDay.charge !== false : true,
+            unitPrice: roundMoney(previousDay ? previousDay.unitPrice : fallbackPrice),
+          };
+        }),
+      };
+    });
+  }
+
+  function buildDailyPricingSourceRows() {
+    const groups = new Map();
+
+    state.currentRentalItems.forEach((line) => {
+      if (line.originType === "kit") {
+        const key = `kit:${line.originKitId || line.originName || line.itemId}`;
+        const originQty = Math.max(1, toNumber(line.originKitQty || 1));
+        const current = groups.get(key) || {
+          key,
+          type: "kit",
+          label: line.originName || "Conjunto",
+          qty: originQty,
+          unitLabel: "conjunto",
+          componentTotal: 0,
+        };
+        current.qty = Math.max(current.qty, originQty);
+        current.componentTotal += toNumber(line.qty) * toNumber(line.unitPrice);
+        groups.set(key, current);
+        return;
+      }
+
+      const key = `item:${line.itemId}`;
+      groups.set(key, {
+        key,
+        type: "item",
+        label: line.name || "Item",
+        qty: Math.max(1, toNumber(line.qty)),
+        unitLabel: "unidade",
+        defaultUnitPrice: Math.max(0, toNumber(line.unitPrice)),
+      });
+    });
+
+    return Array.from(groups.values()).map((row) => ({
+      ...row,
+      defaultUnitPrice:
+        row.type === "kit" ? roundMoney(toNumber(row.componentTotal) / Math.max(1, toNumber(row.qty))) : roundMoney(row.defaultUnitPrice),
+    }));
+  }
+
+  function getRentalDateRange(startDate, endDate) {
+    if (!startDate || !endDate || endDate < startDate) {
+      return [];
+    }
+
+    const dates = [];
+    let current = startDate;
+    while (current <= endDate && dates.length < 120) {
+      dates.push(current);
+      current = addDaysToISODate(current, 1);
+    }
+    return dates;
+  }
+
+  function getCurrentDailyPricingPayload() {
+    if (!state.dailyPricingEnabled) {
+      return { enabled: false, rows: [] };
+    }
+
+    return {
+      enabled: true,
+      rows: state.dailyPricingRows.map((row) => ({
+        key: row.key,
+        type: row.type,
+        label: row.label,
+        qty: Math.max(1, toNumber(row.qty)),
+        unitLabel: row.unitLabel || "unidade",
+        defaultUnitPrice: roundMoney(row.defaultUnitPrice),
+        days: (row.days || []).map((day) => ({
+          date: day.date,
+          charge: day.charge !== false,
+          unitPrice: Math.max(0, roundMoney(day.unitPrice)),
+        })),
+      })),
+    };
+  }
+
+  function getDailyPricingSubtotal(dailyPricing) {
+    if (!dailyPricing?.enabled || !Array.isArray(dailyPricing.rows)) {
+      return 0;
+    }
+
+    return roundMoney(
+      dailyPricing.rows.reduce((sum, row) => {
+        const qty = Math.max(1, toNumber(row.qty));
+        const rowTotal = (row.days || [])
+          .filter((day) => day.charge !== false)
+          .reduce((daySum, day) => daySum + qty * Math.max(0, toNumber(day.unitPrice)), 0);
+        return sum + rowTotal;
+      }, 0)
+    );
+  }
+
+  function getDailyPricingRowTotal(row) {
+    return getDailyPricingSubtotal({ enabled: true, rows: [row] });
+  }
+
   function renderRentalTotals() {
+    const dailyPricing = getCurrentDailyPricingPayload();
     const totals = calculateTotals(
       state.currentRentalItems,
       toNumber($("#rentalDiscount").value),
       toNumber($("#rentalFreight").value),
-      toNumber($("#rentalDeposit").value)
+      toNumber($("#rentalDeposit").value),
+      dailyPricing
     );
 
     $("#rentalTotals").innerHTML = `
-      <div class="totals-row"><span>Subtotal</span><strong>${formatMoney(totals.subtotal)}</strong></div>
+      <div class="totals-row"><span>${dailyPricing.enabled ? "Subtotal das diarias" : "Subtotal"}</span><strong>${formatMoney(totals.subtotal)}</strong></div>
       <div class="totals-row"><span>Desconto</span><strong>${formatMoney(totals.discount)}</strong></div>
       <div class="totals-row"><span>Frete</span><strong>${formatMoney(totals.freight)}</strong></div>
       <div class="totals-row final"><span>Total final</span><strong>${formatMoney(totals.total)}</strong></div>
@@ -973,7 +1326,9 @@
     const discount = Math.max(0, toNumber($("#rentalDiscount").value));
     const freight = Math.max(0, toNumber($("#rentalFreight").value));
     const deposit = Math.max(0, toNumber($("#rentalDeposit").value));
-    const totals = calculateTotals(lines, discount, freight, deposit);
+    syncDailyPricingRows();
+    const dailyPricing = getCurrentDailyPricingPayload();
+    const totals = calculateTotals(lines, discount, freight, deposit, dailyPricing);
     let paymentStatus = $("#rentalPaymentStatus").value;
 
     if (totals.deposit >= totals.total && totals.total > 0) {
@@ -995,6 +1350,7 @@
       endDate,
       eventLocation: $("#rentalEventLocation").value.trim(),
       items: lines,
+      dailyPricing,
       discount,
       freight: totals.freight,
       subtotal: totals.subtotal,
@@ -1037,15 +1393,29 @@
     const status = $("#rentalStatusFilter").value;
     const date = $("#rentalDateFilter").value;
 
-    const rentals = state.rentals.filter((rental) => {
+    const rentals = sortRentalsByDateDesc(state.rentals.filter((rental) => {
       const client = getClient(rental.clientId);
       const itemText = rental.items.map((item) => item.name).join(" ");
       const text = normalize(`${rental.orderNumber} ${client?.name} ${client?.document} ${client?.phone} ${itemText} ${rental.eventLocation} ${rental.notes}`);
       const dateMatches = !date || (rental.startDate <= date && rental.endDate >= date);
       return (!search || text.includes(search)) && (!status || rental.status === status) && dateMatches;
-    });
+    }));
 
-    $("#rentalsList").innerHTML = rentals.length ? rentals.map(renderRentalCard).join("") : emptyState("Nenhuma locação encontrada.");
+    $("#rentalsList").innerHTML = rentals.length ? rentals.map(renderRentalSummaryCard).join("") : emptyState("Nenhuma locação encontrada.");
+  }
+
+  function renderRentalSummaryCard(rental) {
+    const client = getClient(rental.clientId);
+    const statusClass = getRentalStatusBadgeClass(rental.status);
+    return `
+      <article class="rental-summary-card clickable-item" role="button" tabindex="0" data-rental-id="${rental.id}">
+        <div>
+          <h3>${escapeHtml(client?.name || "Cliente nao encontrado")}</h3>
+          <p>${formatDate(rental.startDate)} ate ${formatDate(rental.endDate)}</p>
+          <span class="badge ${statusClass}">Status: ${statusLabel(rental.status)}</span>
+        </div>
+      </article>
+    `;
   }
 
   function renderRentalCard(rental) {
@@ -1084,6 +1454,7 @@
           <div class="metric"><span>Sinal</span><strong>${formatMoney(totals.deposit)}</strong></div>
           <div class="metric"><span>Restante</span><strong>${formatMoney(totals.remaining)}</strong></div>
         </div>
+        ${rental.dailyPricing?.enabled ? `<p class="muted-text"><strong>Cobranca por dias ativa:</strong> subtotal ${formatMoney(totals.subtotal)}</p>` : ""}
         ${kitSummary.length ? `<p class="muted-text"><strong>Conjuntos:</strong><br>${kitSummary.map((line) => `${escapeHtml(line.qty)}x ${escapeHtml(line.name)}`).join("<br>")}</p>` : ""}
         <p class="muted-text">${items}</p>
         ${rental.eventLocation ? `<p class="muted-text">Local: ${escapeHtml(rental.eventLocation)}</p>` : ""}
@@ -1098,6 +1469,99 @@
         </div>
       </article>
     `;
+  }
+
+  function renderRentalDetailsContent(rental) {
+    const client = getClient(rental.clientId);
+    const totals = getRentalTotals(rental);
+    const kitSummary = getRentalKitSummary(rental);
+    const items = (rental.items || [])
+      .map((line) => {
+        const originQty = line.originKitQty ? `${escapeHtml(line.originKitQty)}x ` : "";
+        const origin = line.originType === "kit" ? ` - origem: ${originQty}${escapeHtml(line.originName || "Conjunto")}` : "";
+        return `${escapeHtml(line.qty)}x ${escapeHtml(line.name)} (${formatMoney(line.unitPrice)})${origin}`;
+      })
+      .join("<br>");
+    const returnProblems = Array.isArray(rental.returnProblems)
+      ? rental.returnProblems
+          .map((problem) => `${escapeHtml(problem.qty)}x ${escapeHtml(problem.name)} - ${escapeHtml(problem.reason)}`)
+          .join("<br>")
+      : "";
+    const statusClass = getRentalStatusBadgeClass(rental.status);
+
+    return `
+      <div class="rental-detail-modal">
+        <div class="card-top">
+          <div>
+            <h3 class="card-title">Pedido ${escapeHtml(rental.orderNumber || "-")}</h3>
+            <p class="card-subtitle">${escapeHtml(client?.name || "Cliente nao encontrado")} - ${formatDate(rental.startDate)} ate ${formatDate(rental.endDate)}</p>
+          </div>
+          <div class="badge-row">
+            <span class="badge ${statusClass}">${statusLabel(rental.status)}</span>
+            <span class="badge">${PAYMENT_STATUS[rental.paymentStatus] || rental.paymentStatus || "-"}</span>
+          </div>
+        </div>
+
+        <section class="detail-section">
+          <h4>Dados do cliente</h4>
+          <div class="detail-grid">
+            <div class="metric"><span>Nome</span><strong>${escapeHtml(client?.name || "-")}</strong></div>
+            <div class="metric"><span>CPF/CNPJ</span><strong>${escapeHtml(client?.document || "-")}</strong></div>
+            <div class="metric"><span>Telefone</span><strong>${escapeHtml(client?.phone || "-")}</strong></div>
+            <div class="metric"><span>Endereco</span><strong>${escapeHtml(client?.address || "-")}</strong></div>
+          </div>
+        </section>
+
+        <section class="detail-section">
+          <h4>Datas e local</h4>
+          <div class="detail-grid">
+            <div class="metric"><span>Data inicial</span><strong>${formatDate(rental.startDate)}</strong></div>
+            <div class="metric"><span>Data final</span><strong>${formatDate(rental.endDate)}</strong></div>
+            <div class="metric"><span>Data do pedido</span><strong>${formatDate(rental.orderDate)}</strong></div>
+            <div class="metric"><span>Local</span><strong>${escapeHtml(rental.eventLocation || "-")}</strong></div>
+          </div>
+        </section>
+
+        <section class="detail-section">
+          <h4>Valores</h4>
+          <div class="metric-grid">
+            <div class="metric"><span>Subtotal</span><strong>${formatMoney(totals.subtotal)}</strong></div>
+            <div class="metric"><span>Desconto</span><strong>${formatMoney(totals.discount)}</strong></div>
+            <div class="metric"><span>Frete</span><strong>${formatMoney(totals.freight)}</strong></div>
+            <div class="metric"><span>Total final</span><strong>${formatMoney(totals.total)}</strong></div>
+            <div class="metric"><span>Sinal</span><strong>${formatMoney(totals.deposit)}</strong></div>
+            <div class="metric"><span>Restante</span><strong>${formatMoney(totals.remaining)}</strong></div>
+          </div>
+        </section>
+
+        ${rental.dailyPricing?.enabled ? `<p class="muted-text"><strong>Cobranca por dias ativa:</strong> subtotal ${formatMoney(totals.subtotal)}</p>` : ""}
+        ${kitSummary.length ? `<p class="muted-text"><strong>Conjuntos:</strong><br>${kitSummary.map((line) => `${escapeHtml(line.qty)}x ${escapeHtml(line.name)}`).join("<br>")}</p>` : ""}
+        <p class="muted-text"><strong>Itens alugados:</strong><br>${items || "Sem itens"}</p>
+        ${rental.notes ? `<p class="muted-text"><strong>Observacoes:</strong><br>${escapeHtml(rental.notes)}</p>` : ""}
+        ${returnProblems ? `<p class="muted-text"><strong>Itens com problema na devolucao:</strong><br>${returnProblems}</p>` : ""}
+
+        <div class="card-actions rental-detail-actions">
+          <button type="button" data-action="receipt-rental" data-id="${rental.id}">Gerar contrato</button>
+          <button type="button" data-action="edit-rental" data-id="${rental.id}">Editar</button>
+          <button type="button" data-action="mark-delivered" data-id="${rental.id}">Marcar entregue</button>
+          <button type="button" data-action="mark-returned" data-id="${rental.id}">Marcar devolvida</button>
+          <button type="button" data-action="cancel-rental" data-id="${rental.id}">Cancelar</button>
+          <button type="button" class="danger-mini" data-action="delete-rental" data-id="${rental.id}">Excluir</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function openRentalDetailsModal(rental) {
+    openModal("Detalhes da locacao", renderRentalDetailsContent(rental));
+    $(".rental-detail-actions", $("#modalRoot")).addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button) {
+        return;
+      }
+
+      await handleRentalAction(button.dataset.action, rental, true);
+    });
   }
 
   function getRentalKitSummary(rental) {
@@ -1120,6 +1584,7 @@
   async function handleStockClick(event) {
     const button = event.target.closest("button[data-action]");
     if (!button) {
+      handleItemSurfaceClick(event);
       return;
     }
 
@@ -1147,6 +1612,43 @@
         refreshAll();
         showToast("Item excluído.");
       }
+    }
+  }
+
+  function handleItemSurfaceClick(event) {
+    if (event.target.closest("button, input, select, textarea, a")) {
+      return;
+    }
+
+    const itemElement = event.target.closest("[data-item-id]");
+    if (!itemElement) {
+      return;
+    }
+
+    const item = getItem(Number(itemElement.dataset.itemId));
+    if (item) {
+      openItemDetailsModal(item);
+    }
+  }
+
+  function handleItemSurfaceKeydown(event) {
+    if (event.target.closest("button, input, select, textarea, a")) {
+      return;
+    }
+
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+
+    const itemElement = event.target.closest("[data-item-id]");
+    if (!itemElement) {
+      return;
+    }
+
+    event.preventDefault();
+    const item = getItem(Number(itemElement.dataset.itemId));
+    if (item) {
+      openItemDetailsModal(item);
     }
   }
 
@@ -1364,30 +1866,65 @@
 
   async function handleRentalClick(event) {
     const button = event.target.closest("button[data-action]");
-    if (!button) {
+    if (button) {
+      const rental = getRental(Number(button.dataset.id));
+      if (rental) {
+        await handleRentalAction(button.dataset.action, rental);
+      }
       return;
     }
 
-    const id = Number(button.dataset.id);
-    const rental = state.rentals.find((item) => Number(item.id) === id);
-    if (!rental) {
-      return;
+    const rentalElement = event.target.closest("[data-rental-id]");
+    if (rentalElement) {
+      const rental = getRental(Number(rentalElement.dataset.rentalId));
+      if (rental) {
+        openRentalDetailsModal(rental);
+      }
     }
+  }
 
-    const action = button.dataset.action;
-
+  async function handleRentalAction(action, rental, fromModal = false) {
     if (action === "edit-rental") {
+      if (fromModal) {
+        closeModal();
+      }
       loadRentalIntoForm(rental);
     } else if (action === "receipt-rental") {
       openReceiptModal(rental);
     } else if (action === "mark-delivered") {
       await markDelivered(rental);
+      if (fromModal) {
+        closeModal();
+      }
     } else if (action === "mark-returned") {
       openReturnModal(rental);
     } else if (action === "cancel-rental") {
       await cancelRental(rental);
+      if (fromModal) {
+        closeModal();
+      }
     } else if (action === "delete-rental") {
       await deleteRental(rental);
+      if (fromModal) {
+        closeModal();
+      }
+    }
+  }
+
+  function handleRentalKeydown(event) {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+
+    const rentalElement = event.target.closest("[data-rental-id]");
+    if (!rentalElement) {
+      return;
+    }
+
+    event.preventDefault();
+    const rental = getRental(Number(rentalElement.dataset.rentalId));
+    if (rental) {
+      openRentalDetailsModal(rental);
     }
   }
 
@@ -1395,6 +1932,8 @@
     const client = getClient(rental.clientId);
     state.editingRentalId = rental.id;
     state.currentRentalItems = rental.items.map((line) => ({ ...line }));
+    state.dailyPricingEnabled = Boolean(rental.dailyPricing?.enabled);
+    state.dailyPricingRows = Array.isArray(rental.dailyPricing?.rows) ? rental.dailyPricing.rows.map((row) => ({ ...row, days: (row.days || []).map((day) => ({ ...day })) })) : [];
     $("#newRentalTitle").textContent = `Editando pedido ${rental.orderNumber}`;
     $("#rentalId").value = rental.id;
     $("#rentalClientId").value = rental.clientId || "";
@@ -1414,6 +1953,7 @@
     $("#rentalPaymentStatus").value = rental.paymentStatus || "unpaid";
     $("#rentalStatus").value = rental.status || "quote";
     $("#rentalNotes").value = rental.notes || "";
+    $("#rentalDailyPricingToggle").checked = state.dailyPricingEnabled;
     renderRentalItemsEditor();
     showView("new-rental");
   }
@@ -1616,40 +2156,193 @@
 
     $("#itemForm").addEventListener("submit", async (event) => {
       event.preventDefault();
-      const form = event.currentTarget;
-      const totalQty = Math.max(0, toNumber(form.totalQty.value));
-      const unavailableQty = Math.min(totalQty, Math.max(0, toNumber(form.unavailableQty.value)));
-      const now = new Date().toISOString();
-      const payload = {
-        id: item?.id,
-        name: form.name.value.trim(),
-        category: form.category.value.trim() || "Outro",
-        color: form.color.value.trim(),
-        totalQty,
-        unavailableQty,
-        defaultPrice: Math.max(0, toNumber(form.defaultPrice.value)),
-        notes: form.notes.value.trim(),
-        createdAt: item?.createdAt || now,
-        updatedAt: now,
-      };
-
-      if (!payload.name) {
-        alert("Informe o nome do item.");
-        return;
-      }
-
-      if (item) {
-        await PlanetaDB.put("items", payload);
-      } else {
-        delete payload.id;
-        await PlanetaDB.add("items", payload);
-      }
-
+      await saveItemFromForm(event.currentTarget, item);
       closeModal();
       await loadAll();
       refreshAll();
       showToast("Item salvo.");
     });
+  }
+
+  async function saveItemFromForm(form, item = null) {
+    const totalQty = Math.max(0, toNumber(form.totalQty.value));
+    const unavailableQty = Math.min(totalQty, Math.max(0, toNumber(form.unavailableQty.value)));
+    const now = new Date().toISOString();
+    const payload = {
+      id: item?.id,
+      name: form.name.value.trim(),
+      category: form.category.value.trim() || "Outro",
+      color: form.color.value.trim(),
+      totalQty,
+      unavailableQty,
+      defaultPrice: Math.max(0, toNumber(form.defaultPrice.value)),
+      notes: form.notes.value.trim(),
+      createdAt: item?.createdAt || now,
+      updatedAt: now,
+    };
+
+    if (!payload.name) {
+      alert("Informe o nome do item.");
+      return null;
+    }
+
+    if (item) {
+      await PlanetaDB.put("items", payload);
+      return payload;
+    }
+
+    delete payload.id;
+    const id = await PlanetaDB.add("items", payload);
+    return { ...payload, id };
+  }
+
+  function openItemDetailsModal(item) {
+    const stats = getItemStats(item);
+    const rentals = getItemRentalHistory(item.id);
+    const rentalsHtml = rentals.length
+      ? rentals
+          .map(({ rental, qty }) => {
+            const client = getClient(rental.clientId);
+            return `
+              <div class="compact-item item-history-row">
+                <div>
+                  <strong>Pedido ${escapeHtml(rental.orderNumber || "-")} - ${escapeHtml(client?.name || "Cliente nao encontrado")}</strong>
+                  <span>${formatDate(rental.startDate)} a ${formatDate(rental.endDate)} - ${escapeHtml(qty)} unidade(s)</span>
+                  <span>Status: ${statusLabel(rental.status)} - Pagamento: ${PAYMENT_STATUS[rental.paymentStatus] || rental.paymentStatus || "-"}</span>
+                </div>
+                <span>${formatMoney(getRentalTotals(rental).total)}</span>
+              </div>
+            `;
+          })
+          .join("")
+      : emptyState("Nenhuma locacao encontrada para este item.");
+
+    openModal(`Detalhes do item`, `
+      <div class="item-detail-modal">
+        <div class="item-detail-tabs" role="tablist" aria-label="Detalhes do item">
+          <button class="tab-btn active" type="button" data-item-tab="info" aria-selected="true">Informacoes</button>
+          <button class="tab-btn" type="button" data-item-tab="stock" aria-selected="false">Estoque</button>
+          <button class="tab-btn" type="button" data-item-tab="rentals" aria-selected="false">Locacoes</button>
+          <button class="tab-btn" type="button" data-item-tab="edit" aria-selected="false">Editar</button>
+        </div>
+
+        <section class="item-tab-panel" data-item-tab-panel="info">
+          <div class="detail-grid">
+            <div class="metric"><span>Nome</span><strong>${escapeHtml(item.name)}</strong></div>
+            <div class="metric"><span>Categoria</span><strong>${escapeHtml(item.category || "Item")}</strong></div>
+            <div class="metric"><span>Cor</span><strong>${escapeHtml(item.color || "-")}</strong></div>
+            <div class="metric"><span>Valor padrao</span><strong>${formatMoney(item.defaultPrice || 0)}</strong></div>
+          </div>
+          <p class="muted-text detail-note">${escapeHtml(item.notes || "Sem observacoes.")}</p>
+        </section>
+
+        <section class="item-tab-panel hidden" data-item-tab-panel="stock">
+          <div class="metric-grid">
+            <div class="metric"><span>Total cadastrado</span><strong>${stats.total}</strong></div>
+            <div class="metric"><span>Disponivel hoje</span><strong>${stats.availableToday}</strong></div>
+            <div class="metric"><span>Reservado hoje</span><strong>${stats.reservedToday}</strong></div>
+            <div class="metric"><span>Alugado/entregue hoje</span><strong>${stats.rentedToday}</strong></div>
+            <div class="metric"><span>Reservado em datas futuras</span><strong>${stats.futureReserved}</strong></div>
+            <div class="metric"><span>Proxima reserva</span><strong>${stats.nextReservationDate ? formatDate(stats.nextReservationDate) : "-"}</strong></div>
+            <div class="metric"><span>Indisponivel</span><strong>${stats.unavailable}</strong></div>
+            <div class="metric"><span>Devolvido</span><strong>${stats.returned}</strong></div>
+          </div>
+        </section>
+
+        <section class="item-tab-panel hidden" data-item-tab-panel="rentals">
+          <div class="compact-list">${rentalsHtml}</div>
+        </section>
+
+        <section class="item-tab-panel hidden" data-item-tab-panel="edit">
+          <form id="itemDetailsForm" class="form-grid">
+            <label class="wide">
+              Nome
+              <input name="name" type="text" required value="${escapeAttr(item.name || "")}">
+            </label>
+            <label>
+              Categoria
+              <input name="category" type="text" list="detailCategoryOptions" required value="${escapeAttr(item.category || "Outro")}">
+              <datalist id="detailCategoryOptions">
+                <option value="Mesa"></option>
+                <option value="Cadeira"></option>
+                <option value="Conjunto"></option>
+                <option value="Forro"></option>
+                <option value="Outro"></option>
+              </datalist>
+            </label>
+            <label>
+              Cor
+              <input name="color" type="text" placeholder="Opcional" value="${escapeAttr(item.color || "")}">
+            </label>
+            <label>
+              Quantidade total
+              <input name="totalQty" type="number" min="0" inputmode="numeric" required value="${item.totalQty ?? 0}">
+            </label>
+            <label>
+              Indisponivel
+              <input name="unavailableQty" type="number" min="0" inputmode="numeric" value="${item.unavailableQty ?? 0}">
+            </label>
+            <label>
+              Valor padrao
+              <input name="defaultPrice" type="number" min="0" step="0.01" inputmode="decimal" value="${item.defaultPrice ?? 0}">
+            </label>
+            <label class="wide">
+              Observacoes
+              <textarea name="notes" rows="3">${escapeHtml(item.notes || "")}</textarea>
+            </label>
+            <div class="form-actions wide">
+              <button class="primary-action" type="submit">Salvar alteracoes</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    `);
+
+    bindItemDetailsModal(item);
+  }
+
+  function bindItemDetailsModal(item) {
+    $$(".tab-btn", $("#modalRoot")).forEach((button) => {
+      button.addEventListener("click", () => {
+        const tab = button.dataset.itemTab;
+        $$(".tab-btn", $("#modalRoot")).forEach((tabButton) => {
+          const active = tabButton.dataset.itemTab === tab;
+          tabButton.classList.toggle("active", active);
+          tabButton.setAttribute("aria-selected", String(active));
+        });
+        $$("[data-item-tab-panel]", $("#modalRoot")).forEach((panel) => {
+          panel.classList.toggle("hidden", panel.dataset.itemTabPanel !== tab);
+        });
+      });
+    });
+
+    $("#itemDetailsForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const saved = await saveItemFromForm(event.currentTarget, item);
+      if (!saved) {
+        return;
+      }
+
+      await loadAll();
+      refreshAll();
+      showToast("Item atualizado.");
+      openItemDetailsModal(getItem(saved.id || item.id) || saved);
+    });
+  }
+
+  function getItemRentalHistory(itemId) {
+    return state.rentals
+      .map((rental) => {
+        const qty = (Array.isArray(rental.items) ? rental.items : [])
+          .filter((line) => Number(line.itemId) === Number(itemId))
+          .reduce((sum, line) => sum + toNumber(line.qty), 0);
+        return { rental, qty };
+      })
+      .filter(({ qty }) => qty > 0)
+      .sort((a, b) => {
+        const startCompare = String(a.rental.startDate || "").localeCompare(String(b.rental.startDate || ""));
+        return startCompare || Number(b.rental.orderNumber || 0) - Number(a.rental.orderNumber || 0);
+      });
   }
 
   function openClientModal(client = null) {
@@ -1870,8 +2563,28 @@
     return applyContractDensity(html, data);
   }
 
-  function buildContractData(rental, client) {
-    const itens = (Array.isArray(rental.items) ? rental.items : []).map((line) => {
+  function buildContractItems(rental) {
+    if (rental?.dailyPricing?.enabled && Array.isArray(rental.dailyPricing.rows) && rental.dailyPricing.rows.length) {
+      return rental.dailyPricing.rows.map((row) => {
+        const quantidade = Math.max(1, toNumber(row.qty));
+        const chargedDays = (row.days || []).filter((day) => day.charge !== false);
+        const valorUnitario = roundMoney(chargedDays.reduce((sum, day) => sum + toNumber(day.unitPrice), 0));
+        const total = roundMoney(quantidade * valorUnitario);
+        const dailyText = chargedDays.length
+          ? chargedDays.map((day) => `${formatDate(day.date)}: ${formatMoney(day.unitPrice)} por ${row.unitLabel || "unidade"}`).join("; ")
+          : "Nenhum dia cobrado";
+        return {
+          quantidade,
+          descricao: `${row.label || "Item"} - cobranca por dias: ${dailyText}`,
+          valor_unitario: valorUnitario,
+          valor_unitario_formatado: formatMoney(valorUnitario),
+          total,
+          total_formatado: formatMoney(total),
+        };
+      });
+    }
+
+    return (Array.isArray(rental.items) ? rental.items : []).map((line) => {
       const quantidade = Math.max(1, toNumber(line.qty));
       const valorUnitario = Math.max(0, toNumber(line.unitPrice));
       const total = roundMoney(quantidade * valorUnitario);
@@ -1884,6 +2597,10 @@
         total_formatado: formatMoney(total),
       };
     });
+  }
+
+  function buildContractData(rental, client) {
+    const itens = buildContractItems(rental);
     const totals = getRentalTotals({ ...rental, items: rental.items || [] });
     const valorTotal = totals.total;
     const sinal = totals.deposit;
@@ -3098,14 +3815,18 @@
       Array.isArray(rental?.items) ? rental.items : [],
       rental?.discount,
       rental?.freight,
-      rental?.deposit
+      rental?.deposit,
+      rental?.dailyPricing
     );
   }
 
-  function calculateTotals(items, discountValue, freightValue, depositValue) {
+  function calculateTotals(items, discountValue, freightValue, depositValue, dailyPricing = null) {
     const freightInput = depositValue === undefined ? 0 : freightValue;
     const depositInput = depositValue === undefined ? freightValue : depositValue;
-    const subtotal = (Array.isArray(items) ? items : []).reduce((sum, line) => sum + toNumber(line.qty) * toNumber(line.unitPrice), 0);
+    const dailySubtotal = getDailyPricingSubtotal(dailyPricing);
+    const subtotal = dailyPricing?.enabled
+      ? dailySubtotal
+      : (Array.isArray(items) ? items : []).reduce((sum, line) => sum + toNumber(line.qty) * toNumber(line.unitPrice), 0);
     const discount = Math.min(subtotal, Math.max(0, toNumber(discountValue)));
     const freight = Math.max(0, toNumber(freightInput));
     const total = Math.max(0, roundMoney(subtotal - discount + freight));
@@ -3142,6 +3863,46 @@
 
   function getClient(id) {
     return state.clients.find((client) => Number(client.id) === Number(id));
+  }
+
+  function getRental(id) {
+    return state.rentals.find((rental) => Number(rental.id) === Number(id));
+  }
+
+  function isActiveRental(rental) {
+    return ACTIVE_STATUSES.includes(rental?.status);
+  }
+
+  function sortRentalsByDateDesc(rentals) {
+    return [...(Array.isArray(rentals) ? rentals : [])].sort((a, b) => {
+      const startCompare = String(b.startDate || "").localeCompare(String(a.startDate || ""));
+      if (startCompare) {
+        return startCompare;
+      }
+
+      const endCompare = String(b.endDate || "").localeCompare(String(a.endDate || ""));
+      if (endCompare) {
+        return endCompare;
+      }
+
+      return Number(b.orderNumber || 0) - Number(a.orderNumber || 0);
+    });
+  }
+
+  function getRentalStatusBadgeClass(status) {
+    if (status === "cancelled") {
+      return "red";
+    }
+
+    if (status === "returned") {
+      return "green";
+    }
+
+    if (status === "delivered") {
+      return "blue";
+    }
+
+    return "yellow";
   }
 
   function findClientByCpfDigits(cpfDigits) {

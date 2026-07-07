@@ -10,13 +10,13 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="format-detection" content="telephone=no">
   <title>Planeta Locações</title>
-  <link rel="manifest" href="manifest.json?v=20">
+  <link rel="manifest" href="manifest.json?v=22">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
-  <link rel="stylesheet" href="style.css?v=20">
+  <link rel="stylesheet" href="style.css?v=22">
 </head>
 <body>
   <div class="app-shell">
@@ -76,6 +76,13 @@
             <div id="dashboardAlerts" class="compact-list"></div>
           </section>
         </div>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Locacoes por status</h3>
+          </div>
+          <div id="dashboardStatusBoards" class="status-board-grid"></div>
+        </section>
 
         <section class="panel">
           <div class="panel-head">
@@ -249,6 +256,20 @@
             </div>
 
             <div id="rentalItemsEditor" class="line-list"></div>
+          </section>
+
+          <section class="line-editor daily-pricing-panel" aria-label="Cobranca por dias">
+            <div class="panel-head">
+              <div>
+                <h3>Cobranca por dias</h3>
+                <p class="muted-text">Ative somente quando quiser cobrar valores diferentes por diaria.</p>
+              </div>
+              <label class="switch-label">
+                <span>Cobrar por dias</span>
+                <input id="rentalDailyPricingToggle" type="checkbox">
+              </label>
+            </div>
+            <div id="dailyPricingEditor" class="daily-pricing-editor" hidden></div>
           </section>
 
           <div class="form-grid">
@@ -566,7 +587,7 @@
   <div id="modalRoot"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="db.js?v=20"></script>
-  <script src="app.js?v=20"></script>
+  <script src="db.js?v=22"></script>
+  <script src="app.js?v=22"></script>
 </body>
 </html>
