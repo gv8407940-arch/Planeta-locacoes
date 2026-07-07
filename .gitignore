@@ -1,0 +1,6 @@
+tmp/
+*.zip
+*.msi
+*.log
+.DS_Store
+Thumbs.db
