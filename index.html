@@ -10,13 +10,13 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="format-detection" content="telephone=no">
   <title>Planeta Locações</title>
-  <link rel="manifest" href="manifest.json?v=22">
+  <link rel="manifest" href="manifest.json?v=23">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
-  <link rel="stylesheet" href="style.css?v=22">
+  <link rel="stylesheet" href="style.css?v=23">
 </head>
 <body>
   <div class="app-shell">
@@ -88,6 +88,21 @@
           <div class="panel-head">
             <h3>Disponibilidade por item</h3>
           </div>
+          <div class="availability-query" data-availability-control>
+            <label>
+              Ver disponibilidade de
+              <input type="date" data-availability-start>
+            </label>
+            <label>
+              Ate
+              <input type="date" data-availability-end>
+            </label>
+            <div class="availability-actions">
+              <button class="secondary-action" type="button" data-action="apply-availability">Consultar</button>
+              <button class="ghost-action" type="button" data-action="availability-today">Hoje</button>
+            </div>
+          </div>
+          <p class="muted-text availability-label" data-availability-label></p>
           <div id="inventorySummary" class="inventory-strip"></div>
         </section>
       </section>
@@ -124,6 +139,27 @@
             </span>
           </label>
         </div>
+
+        <section class="line-editor availability-panel" data-availability-control>
+          <div class="panel-head">
+            <h3>Consulta de disponibilidade</h3>
+          </div>
+          <div class="availability-query">
+            <label>
+              De
+              <input type="date" data-availability-start>
+            </label>
+            <label>
+              Ate
+              <input type="date" data-availability-end>
+            </label>
+            <div class="availability-actions">
+              <button class="secondary-action" type="button" data-action="apply-availability">Consultar</button>
+              <button class="ghost-action" type="button" data-action="availability-today">Hoje</button>
+            </div>
+          </div>
+          <p class="muted-text availability-label" data-availability-label></p>
+        </section>
 
         <div id="stockList" class="data-list"></div>
       </section>
@@ -587,7 +623,7 @@
   <div id="modalRoot"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="db.js?v=22"></script>
-  <script src="app.js?v=22"></script>
+  <script src="db.js?v=23"></script>
+  <script src="app.js?v=23"></script>
 </body>
 </html>

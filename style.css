@@ -334,6 +334,31 @@ main {
   grid-template-columns: 1fr;
 }
 
+.availability-panel {
+  margin-top: 0;
+}
+
+.availability-query {
+  display: grid;
+  gap: 10px;
+}
+
+.availability-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+}
+
+.availability-actions button {
+  min-height: 42px;
+}
+
+.availability-label {
+  margin: 10px 0 0;
+  font-weight: 800;
+}
+
 .stock-view-toggle {
   align-self: end;
 }
@@ -1182,6 +1207,11 @@ body.modal-open {
 
   .toolbar {
     grid-template-columns: minmax(220px, 1.4fr) minmax(150px, 0.9fr) minmax(150px, 0.9fr) minmax(220px, auto);
+  }
+
+  .availability-query {
+    grid-template-columns: minmax(170px, 1fr) minmax(170px, 1fr) auto;
+    align-items: end;
   }
 
   .data-list {

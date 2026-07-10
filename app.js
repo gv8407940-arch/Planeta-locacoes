@@ -1,16 +1,16 @@
-(function () {
+﻿(function () {
   "use strict";
 
   const ACTIVE_STATUSES = ["reserved", "delivered"];
   const RENTAL_STATUS = {
-    quote: "Orçamento",
+    quote: "OrÃ§amento",
     reserved: "Reservado",
     delivered: "Entregue/alugado",
     returned: "Devolvido",
     cancelled: "Cancelado",
   };
   const PAYMENT_STATUS = {
-    unpaid: "Não pago",
+    unpaid: "NÃ£o pago",
     partial: "Sinal pago",
     paid: "Pago completo",
   };
@@ -32,7 +32,7 @@
     "future-expense": "Gasto futuro",
   };
   const DASHBOARD_STATUS_ORDER = ["reserved", "delivered", "returned", "cancelled"];
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=22";
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=23";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -60,6 +60,8 @@
     stockViewMode: "detailed",
     dailyPricingEnabled: false,
     dailyPricingRows: [],
+    availabilityStartDate: "",
+    availabilityEndDate: "",
   };
 
   const moneyFormatter = new Intl.NumberFormat("pt-BR", {
@@ -79,6 +81,7 @@
       await removeSeededDemoDataIfSafe();
       await migrateFinanceData();
       await loadPreferences();
+      resetAvailabilityPeriod();
       bindEvents();
       await loadAll();
       startNewRental();
@@ -88,7 +91,7 @@
 
     } catch (error) {
       console.error(error);
-      alert("Não foi possível iniciar o sistema local. Verifique se o navegador permite IndexedDB.");
+      alert("NÃ£o foi possÃ­vel iniciar o sistema local. Verifique se o navegador permite IndexedDB.");
     }
   }
 
@@ -113,6 +116,15 @@
       state.stockViewMode = event.currentTarget.checked ? "detailed" : "simple";
       await PlanetaDB.setMeta("stockViewMode", state.stockViewMode);
       renderStock();
+    });
+    $$("[data-availability-start], [data-availability-end]").forEach((input) => {
+      input.addEventListener("change", handleAvailabilityDateChange);
+    });
+    $$("[data-action='apply-availability']").forEach((button) => {
+      button.addEventListener("click", handleAvailabilityApply);
+    });
+    $$("[data-action='availability-today']").forEach((button) => {
+      button.addEventListener("click", handleAvailabilityToday);
     });
     $("#clientsSearch").addEventListener("input", renderClients);
     $("#rentalsSearch").addEventListener("input", renderRentals);
@@ -321,7 +333,73 @@
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function resetAvailabilityPeriod() {
+    const today = todayISO();
+    state.availabilityStartDate = today;
+    state.availabilityEndDate = today;
+  }
+
+  function getAvailabilityPeriod() {
+    const startDate = state.availabilityStartDate || todayISO();
+    const endDate = state.availabilityEndDate || startDate;
+    return endDate < startDate ? { startDate: endDate, endDate: startDate } : { startDate, endDate };
+  }
+
+  function getAvailabilityPeriodLabel() {
+    const { startDate, endDate } = getAvailabilityPeriod();
+    return startDate === endDate
+      ? `Disponibilidade em ${formatDate(startDate)}`
+      : `Disponibilidade de ${formatDate(startDate)} ate ${formatDate(endDate)}`;
+  }
+
+  function syncAvailabilityControls() {
+    const { startDate, endDate } = getAvailabilityPeriod();
+    $$("[data-availability-start]").forEach((input) => {
+      input.value = startDate;
+    });
+    $$("[data-availability-end]").forEach((input) => {
+      input.value = endDate;
+    });
+    $$("[data-availability-label]").forEach((label) => {
+      label.textContent = getAvailabilityPeriodLabel();
+    });
+  }
+
+  function setAvailabilityPeriod(startDate, endDate) {
+    const fallback = todayISO();
+    const start = startDate || fallback;
+    const end = endDate || start;
+    state.availabilityStartDate = start;
+    state.availabilityEndDate = end < start ? start : end;
+    syncAvailabilityControls();
+    renderDashboard();
+    renderStock();
+    renderKits();
+  }
+
+  function handleAvailabilityDateChange(event) {
+    const control = event.target.closest("[data-availability-control]");
+    const startDate = control?.querySelector("[data-availability-start]")?.value || state.availabilityStartDate;
+    const endDate = control?.querySelector("[data-availability-end]")?.value || startDate;
+    setAvailabilityPeriod(startDate, endDate);
+  }
+
+  function handleAvailabilityApply(event) {
+    const control = event.target.closest("[data-availability-control]");
+    const startDate = control?.querySelector("[data-availability-start]")?.value || state.availabilityStartDate;
+    const endDate = control?.querySelector("[data-availability-end]")?.value || startDate;
+    setAvailabilityPeriod(startDate, endDate);
+    showToast(getAvailabilityPeriodLabel());
+  }
+
+  function handleAvailabilityToday() {
+    const today = todayISO();
+    setAvailabilityPeriod(today, today);
+  }
+
   function renderDashboard() {
+    syncAvailabilityControls();
+    const { startDate, endDate } = getAvailabilityPeriod();
     const activeRentals = state.rentals.filter(isActiveRental);
     const scheduleEntries = getScheduleEntries(3);
     const upcomingStarts = scheduleEntries.filter((entry) => entry.actionType === "start").length;
@@ -329,14 +407,14 @@
     const receivable = state.rentals
       .filter((rental) => !["returned", "cancelled"].includes(rental.status) && rental.paymentStatus !== "paid")
       .reduce((sum, rental) => sum + getRentalTotals(rental).remaining, 0);
-    const availableUnits = state.items.reduce((sum, item) => sum + getItemStats(item).availableToday, 0);
+    const availableUnits = state.items.reduce((sum, item) => sum + getItemAvailabilityForPeriod(item, startDate, endDate).available, 0);
 
     $("#dashboardStats").innerHTML = [
-      ["Locações ativas", activeRentals.length],
+      ["LocaÃ§Ãµes ativas", activeRentals.length],
       ["Entregar/retirar 3 dias", upcomingStarts],
       ["Buscar/devolver 3 dias", upcomingEnds],
       ["Valor a receber", formatMoney(receivable)],
-      ["Itens disponíveis", availableUnits],
+      ["Itens disponiveis no periodo", availableUnits],
     ]
       .map(([label, value]) => `<article class="kpi-card"><span>${label}</span><strong>${value}</strong></article>`)
       .join("");
@@ -349,14 +427,15 @@
       ? state.items
           .slice(0, 12)
           .map((item) => {
-            const stats = getItemStats(item);
+            const periodStats = getItemAvailabilityForPeriod(item, startDate, endDate);
             return `
               <div class="inventory-pill clickable-item" role="button" tabindex="0" data-item-id="${item.id}">
                 <div>
                   <strong>${escapeHtml(item.name)}</strong>
-                  <span>${escapeHtml(item.category || "Sem categoria")}${item.color ? ` · ${escapeHtml(item.color)}` : ""}</span>
+                  <span>${escapeHtml(item.category || "Sem categoria")}${item.color ? ` - ${escapeHtml(item.color)}` : ""}</span>
+                  <span>Total ${periodStats.total} - ocupado ${periodStats.occupied}</span>
                 </div>
-                  <strong>${stats.availableToday}</strong>
+                <strong>${periodStats.available}</strong>
               </div>
             `;
           })
@@ -428,7 +507,7 @@
   function renderReservationReminders(entries) {
     const reminders = entries.slice(0, 8);
     if (!reminders.length) {
-      return emptyState("Nenhuma entrega, busca ou devolução nos próximos 3 dias.");
+      return emptyState("Nenhuma entrega, busca ou devoluÃ§Ã£o nos prÃ³ximos 3 dias.");
     }
 
     return reminders
@@ -438,7 +517,7 @@
           <div class="compact-item reminder-item ${isToday ? "today" : ""}">
             <div>
               <strong>${escapeHtml(entry.actionLabel)} - pedido ${escapeHtml(entry.rental.orderNumber)}</strong>
-              <span>${formatDate(entry.date)} · ${escapeHtml(entry.client?.name || "Cliente não encontrado")}</span>
+              <span>${formatDate(entry.date)} Â· ${escapeHtml(entry.client?.name || "Cliente nÃ£o encontrado")}</span>
               <span>${escapeHtml(entry.itemText)}</span>
             </div>
             <span>${isToday ? "Hoje" : statusLabel(entry.rental.status)}</span>
@@ -453,9 +532,9 @@
       <div class="compact-item agenda-item">
         <div>
           <strong>${escapeHtml(entry.actionLabel)} - pedido ${escapeHtml(entry.rental.orderNumber)}</strong>
-          <span>${escapeHtml(entry.client?.name || "Cliente não encontrado")} · ${escapeHtml(entry.itemText)}</span>
-          <span>Entrega/retirada: ${formatDate(entry.rental.startDate)} · Devolução/busca: ${formatDate(entry.rental.endDate)}</span>
-          <span>Status: ${statusLabel(entry.rental.status)} · Pagamento: ${PAYMENT_STATUS[entry.rental.paymentStatus] || entry.rental.paymentStatus || "-"}</span>
+          <span>${escapeHtml(entry.client?.name || "Cliente nÃ£o encontrado")} Â· ${escapeHtml(entry.itemText)}</span>
+          <span>Entrega/retirada: ${formatDate(entry.rental.startDate)} Â· DevoluÃ§Ã£o/busca: ${formatDate(entry.rental.endDate)}</span>
+          <span>Status: ${statusLabel(entry.rental.status)} Â· Pagamento: ${PAYMENT_STATUS[entry.rental.paymentStatus] || entry.rental.paymentStatus || "-"}</span>
         </div>
         <span>${formatMoney(getRentalTotals(entry.rental).total)}</span>
       </div>
@@ -467,7 +546,7 @@
       return "Entregar/retirar";
     }
 
-    return rental.status === "reserved" ? "Devolução prevista" : "Buscar/devolver";
+    return rental.status === "reserved" ? "DevoluÃ§Ã£o prevista" : "Buscar/devolver";
   }
 
   function getRentalItemSummary(rental) {
@@ -482,9 +561,10 @@
   }
 
   function renderAlerts() {
+    const { startDate, endDate } = getAvailabilityPeriod();
     const alerts = state.items
-      .map((item) => ({ item, stats: getItemStats(item) }))
-      .filter(({ stats }) => stats.availableToday <= 2 || stats.unavailable > 0)
+      .map((item) => ({ item, stats: getItemAvailabilityForPeriod(item, startDate, endDate) }))
+      .filter(({ stats }) => stats.available <= 2 || stats.unavailable > 0)
       .slice(0, 10);
 
     if (!alerts.length) {
@@ -496,9 +576,9 @@
         <div class="compact-item">
           <div>
             <strong>${escapeHtml(item.name)}</strong>
-            <span>${stats.availableToday <= 2 ? "Disponibilidade baixa hoje" : "Tem item indisponível"}</span>
+            <span>${stats.available <= 2 ? "Disponibilidade baixa no periodo" : "Tem item indisponivel"}</span>
           </div>
-          <span>${stats.availableToday} hoje</span>
+          <span>${stats.available} disponivel</span>
         </div>
       `)
       .join("");
@@ -577,6 +657,7 @@
   }
 
   function renderStock() {
+    syncAvailabilityControls();
     const search = normalize($("#stockSearch").value);
     const category = $("#stockCategoryFilter").value;
     const color = $("#stockColorFilter").value;
@@ -607,12 +688,15 @@
 
   function renderItemCard(item) {
     const stats = getItemStats(item);
+    const { startDate, endDate } = getAvailabilityPeriod();
+    const periodStats = getItemAvailabilityForPeriod(item, startDate, endDate);
+    const conflictText = renderAvailabilityConflictText(item, periodStats.conflicts);
     return `
       <article class="data-card clickable-item" role="button" tabindex="0" data-item-id="${item.id}">
         <div class="card-top">
           <div>
             <h3 class="card-title">${escapeHtml(item.name)}</h3>
-            <p class="card-subtitle">${escapeHtml(item.notes || "Sem observações")}</p>
+            <p class="card-subtitle">${escapeHtml(item.notes || "Sem observaÃ§Ãµes")}</p>
           </div>
           <div class="badge-row">
             <span class="badge">${escapeHtml(item.category || "Item")}</span>
@@ -621,15 +705,17 @@
         </div>
         <div class="metric-grid">
           <div class="metric"><span>Total</span><strong>${stats.total}</strong></div>
-          <div class="metric"><span>Disponível hoje</span><strong>${stats.availableToday}</strong></div>
-          <div class="metric"><span>Reservado hoje</span><strong>${stats.reservedToday}</strong></div>
-          <div class="metric"><span>Alugado hoje</span><strong>${stats.rentedToday}</strong></div>
+          <div class="metric"><span>Disponivel no periodo</span><strong>${periodStats.available}</strong></div>
+          <div class="metric"><span>Ocupado no periodo</span><strong>${periodStats.occupied}</strong></div>
+          <div class="metric"><span>Reservado no periodo</span><strong>${periodStats.reserved}</strong></div>
+          <div class="metric"><span>Entregue/alugado</span><strong>${periodStats.delivered}</strong></div>
           <div class="metric"><span>Reservado futuro</span><strong>${stats.futureReserved}</strong></div>
-          <div class="metric"><span>Próxima reserva</span><strong>${stats.nextReservationDate ? formatDate(stats.nextReservationDate) : "-"}</strong></div>
+          <div class="metric"><span>PrÃ³xima reserva</span><strong>${stats.nextReservationDate ? formatDate(stats.nextReservationDate) : "-"}</strong></div>
           <div class="metric"><span>Devolvido</span><strong>${stats.returned}</strong></div>
-          <div class="metric"><span>Indisponível</span><strong>${stats.unavailable}</strong></div>
+          <div class="metric"><span>IndisponÃ­vel</span><strong>${stats.unavailable}</strong></div>
         </div>
-        <p class="muted-text">Valor padrão: <strong>${formatMoney(item.defaultPrice || 0)}</strong></p>
+        ${conflictText ? `<p class="muted-text"><strong>Uso no periodo:</strong><br>${conflictText}</p>` : `<p class="muted-text">Nenhuma locacao ocupando este item no periodo consultado.</p>`}
+        <p class="muted-text">Valor padrÃ£o: <strong>${formatMoney(item.defaultPrice || 0)}</strong></p>
         <div class="card-actions">
           <button type="button" data-action="edit-item" data-id="${item.id}">Editar</button>
           <button type="button" class="danger-mini" data-action="delete-item" data-id="${item.id}">Excluir</button>
@@ -639,16 +725,21 @@
   }
 
   function renderKits() {
-    $("#kitsList").innerHTML = state.kits.length ? state.kits.map(renderKitCard).join("") : emptyState("Cadastre conjuntos para lançar locações mais rápido.");
+    syncAvailabilityControls();
+    $("#kitsList").innerHTML = state.kits.length ? state.kits.map(renderKitCard).join("") : emptyState("Cadastre conjuntos para lanÃ§ar locaÃ§Ãµes mais rÃ¡pido.");
   }
 
   function renderKitCard(kit) {
     const components = Array.isArray(kit.items) ? kit.items : [];
+    const { startDate, endDate } = getAvailabilityPeriod();
+    const kitAvailability = getKitAvailabilityForPeriod(kit, startDate, endDate);
     const componentText = components.length
       ? components
           .map((component) => {
             const item = getItem(component.itemId);
-            return `${escapeHtml(component.qty)}x ${escapeHtml(item?.name || component.name || "Item removido")}`;
+            const itemAvailability = item ? getItemAvailabilityForPeriod(item, startDate, endDate) : null;
+            const availableText = itemAvailability ? ` - ${itemAvailability.available} disponivel` : "";
+            return `${escapeHtml(component.qty)}x ${escapeHtml(item?.name || component.name || "Item removido")}${availableText}`;
           })
           .join("<br>")
       : "Sem itens";
@@ -658,9 +749,13 @@
         <div class="card-top">
           <div>
             <h3 class="card-title">${escapeHtml(kit.name)}</h3>
-            <p class="card-subtitle">${escapeHtml(kit.notes || "Sem observações")}</p>
+            <p class="card-subtitle">${escapeHtml(kit.notes || "Sem observaÃ§Ãµes")}</p>
           </div>
           <span class="badge">${components.length} item${components.length === 1 ? "" : "s"}</span>
+        </div>
+        <div class="metric-grid">
+          <div class="metric"><span>Disponivel no periodo</span><strong>${kitAvailability.available}</strong></div>
+          <div class="metric"><span>Item limitante</span><strong>${escapeHtml(kitAvailability.limitingItem || "-")}</strong></div>
         </div>
         <p class="muted-text">${componentText}</p>
         <div class="card-actions">
@@ -700,14 +795,14 @@
             <h3 class="card-title">${escapeHtml(client.name)}</h3>
             <p class="card-subtitle">${escapeHtml(client.phone || "Sem telefone")}</p>
           </div>
-          <span class="badge">${rentals.length} locação${rentals.length === 1 ? "" : "es"}</span>
+          <span class="badge">${rentals.length} locaÃ§Ã£o${rentals.length === 1 ? "" : "es"}</span>
         </div>
         <p class="muted-text">
           ${client.document ? `Documento: ${escapeHtml(client.document)}<br>` : ""}
-          ${client.address ? `Endereço: ${escapeHtml(client.address)}<br>` : ""}
+          ${client.address ? `EndereÃ§o: ${escapeHtml(client.address)}<br>` : ""}
           ${client.notes ? `Obs.: ${escapeHtml(client.notes)}` : ""}
         </p>
-        <div class="compact-list">${history.length ? history.join("") : emptyState("Sem histórico de locações.")}</div>
+        <div class="compact-list">${history.length ? history.join("") : emptyState("Sem histÃ³rico de locaÃ§Ãµes.")}</div>
         <div class="card-actions">
           <button type="button" data-action="edit-client" data-id="${client.id}">Editar</button>
           <button type="button" class="danger-mini" data-action="delete-client" data-id="${client.id}">Excluir</button>
@@ -718,7 +813,7 @@
 
   function renderFormOptions() {
     $("#rentalItemSelect").innerHTML = state.items.length
-      ? state.items.map((item) => `<option value="${item.id}">${escapeHtml(item.name)} · ${formatMoney(item.defaultPrice || 0)}</option>`).join("")
+      ? state.items.map((item) => `<option value="${item.id}">${escapeHtml(item.name)} Â· ${formatMoney(item.defaultPrice || 0)}</option>`).join("")
       : `<option value="">Cadastre itens no estoque</option>`;
     $("#rentalKitSelect").innerHTML = state.kits.length
       ? state.kits.map((kit) => `<option value="${kit.id}">${escapeHtml(kit.name)}</option>`).join("")
@@ -732,7 +827,7 @@
     state.dailyPricingRows = [];
     $("#rentalId").value = "";
     $("#rentalClientId").value = "";
-    $("#newRentalTitle").textContent = "Nova locação";
+    $("#newRentalTitle").textContent = "Nova locaÃ§Ã£o";
     $("#rentalForm").reset();
     $("#clientMatchInfo").textContent = "";
     $("#rentalOrderDate").value = todayISO();
@@ -756,7 +851,7 @@
     const qty = Math.max(1, toNumber($("#rentalItemQty").value));
 
     if (!item) {
-      alert("Cadastre um item no estoque antes de adicionar à locação.");
+      alert("Cadastre um item no estoque antes de adicionar Ã  locaÃ§Ã£o.");
       return;
     }
 
@@ -782,12 +877,12 @@
     const qty = Math.max(1, Math.floor(toNumber($("#rentalKitQty").value)));
 
     if (!kit) {
-      alert("Cadastre um conjunto antes de adicionar à locação.");
+      alert("Cadastre um conjunto antes de adicionar Ã  locaÃ§Ã£o.");
       return;
     }
 
     if (!Array.isArray(kit.items) || !kit.items.length) {
-      alert("Este conjunto não tem itens cadastrados.");
+      alert("Este conjunto nÃ£o tem itens cadastrados.");
       return;
     }
 
@@ -823,14 +918,14 @@
     });
 
     if (missingItems.length) {
-      alert(`Alguns itens do conjunto não existem mais no estoque:\n\n${missingItems.join("\n")}`);
+      alert(`Alguns itens do conjunto nÃ£o existem mais no estoque:\n\n${missingItems.join("\n")}`);
     }
 
     $("#rentalKitQty").value = "1";
     renderRentalItemsEditor();
     const shortages = getCurrentRentalShortages();
     if (shortages.length) {
-      alert(`Atenção: o conjunto foi adicionado, mas há falta de estoque no período:\n\n${shortages.join("\n")}`);
+      alert(`AtenÃ§Ã£o: o conjunto foi adicionado, mas hÃ¡ falta de estoque no perÃ­odo:\n\n${shortages.join("\n")}`);
     }
   }
 
@@ -885,7 +980,7 @@
 
   function getRentalLineAvailabilityText(item, line, startDate, endDate) {
     if (!item) {
-      return `<span class="badge red">Item não encontrado</span>`;
+      return `<span class="badge red">Item nÃ£o encontrado</span>`;
     }
 
     if (!startDate || !endDate) {
@@ -893,13 +988,13 @@
     }
 
     if (endDate < startDate) {
-      return `<span class="badge red">Confira as datas da locação</span>`;
+      return `<span class="badge red">Confira as datas da locaÃ§Ã£o</span>`;
     }
 
     const available = getAvailableForPeriod(item, startDate, endDate, state.editingRentalId);
     const total = Number(item.totalQty) || 0;
     const isShort = available < (Number(line.qty) || 0);
-    return `<span class="badge ${isShort ? "red" : "green"}">Disponível no período selecionado: ${available} de ${total}</span>`;
+    return `<span class="badge ${isShort ? "red" : "green"}">DisponÃ­vel no perÃ­odo selecionado: ${available} de ${total}</span>`;
   }
 
   function handleRentalLineInput(event) {
@@ -1217,13 +1312,13 @@
 
     const shortages = checkRentalAvailability(rental, rental.id || null);
     if (shortages.length) {
-      const message = `Estoque insuficiente no período:\n\n${shortages.join("\n")}`;
+      const message = `Estoque insuficiente no perÃ­odo:\n\n${shortages.join("\n")}`;
       if (rental.status === "quote") {
-        if (!confirm(`${message}\n\nDeseja salvar apenas como orçamento mesmo assim?`)) {
+        if (!confirm(`${message}\n\nDeseja salvar apenas como orÃ§amento mesmo assim?`)) {
           return;
         }
       } else {
-        alert(`${message}\n\nA reserva ou entrega não foi salva.`);
+        alert(`${message}\n\nA reserva ou entrega nÃ£o foi salva.`);
         return;
       }
     }
@@ -1240,7 +1335,7 @@
       rental.returnProblems = existing.returnProblems || [];
       rental.updatedAt = now;
       await PlanetaDB.put("rentals", rental);
-      showToast(`Locação ${rental.orderNumber} atualizada.`);
+      showToast(`LocaÃ§Ã£o ${rental.orderNumber} atualizada.`);
     } else {
       delete rental.id;
       rental.orderNumber = await PlanetaDB.nextOrderNumber();
@@ -1248,7 +1343,7 @@
       rental.updatedAt = now;
       rental.returnProblems = [];
       await PlanetaDB.add("rentals", rental);
-      showToast(`Locação ${rental.orderNumber} salva como ${statusLabel(rental.status)}.`);
+      showToast(`LocaÃ§Ã£o ${rental.orderNumber} salva como ${statusLabel(rental.status)}.`);
     }
 
     await loadAll();
@@ -1258,7 +1353,7 @@
     } catch (error) {
       console.error(error);
       const detail = error?.name || error?.message ? `\n\nDetalhe: ${[error?.name, error?.message].filter(Boolean).join(" - ")}` : "";
-      alert(`Não foi possível salvar a locação. Verifique os dados e tente novamente.${detail}`);
+      alert(`NÃ£o foi possÃ­vel salvar a locaÃ§Ã£o. Verifique os dados e tente novamente.${detail}`);
     }
   }
 
@@ -1279,16 +1374,16 @@
     }
 
     if (!isValidCpf(clientCpf)) {
-      $("#clientMatchInfo").textContent = "CPF inválido. Confira os 11 dígitos antes de salvar a locação.";
+      $("#clientMatchInfo").textContent = "CPF invÃ¡lido. Confira os 11 dÃ­gitos antes de salvar a locaÃ§Ã£o.";
       $("#rentalClientCpf").focus();
-      alert("Informe um CPF válido para continuar a locação. O CPF precisa ter 11 dígitos e dígitos verificadores corretos.");
+      alert("Informe um CPF vÃ¡lido para continuar a locaÃ§Ã£o. O CPF precisa ter 11 dÃ­gitos e dÃ­gitos verificadores corretos.");
       return null;
     }
 
     $("#rentalClientCpf").value = formatCpf(cpfDigits);
 
     if (!orderDate || !startDate || !endDate || endDate < startDate) {
-      alert("Informe as datas do pedido, retirada/entrega e devolução corretamente.");
+      alert("Informe as datas do pedido, retirada/entrega e devoluÃ§Ã£o corretamente.");
       return null;
     }
 
@@ -1319,7 +1414,7 @@
       .filter((line) => line.itemId && line.qty > 0);
 
     if (!lines.length) {
-      alert("Adicione pelo menos um item à locação.");
+      alert("Adicione pelo menos um item Ã  locaÃ§Ã£o.");
       return null;
     }
 
@@ -1384,7 +1479,7 @@
       address: rental.clientDraft.address,
     };
 
-    rental.orderNumber = existing?.orderNumber || "Prévia";
+    rental.orderNumber = existing?.orderNumber || "PrÃ©via";
     openReceiptModal(rental, client);
   }
 
@@ -1401,7 +1496,7 @@
       return (!search || text.includes(search)) && (!status || rental.status === status) && dateMatches;
     }));
 
-    $("#rentalsList").innerHTML = rentals.length ? rentals.map(renderRentalSummaryCard).join("") : emptyState("Nenhuma locação encontrada.");
+    $("#rentalsList").innerHTML = rentals.length ? rentals.map(renderRentalSummaryCard).join("") : emptyState("Nenhuma locaÃ§Ã£o encontrada.");
   }
 
   function renderRentalSummaryCard(rental) {
@@ -1425,7 +1520,7 @@
     const items = rental.items
       .map((line) => {
         const originQty = line.originKitQty ? `${escapeHtml(line.originKitQty)}x ` : "";
-        const origin = line.originType === "kit" ? ` · origem: ${originQty}${escapeHtml(line.originName || "Conjunto")}` : "";
+        const origin = line.originType === "kit" ? ` Â· origem: ${originQty}${escapeHtml(line.originName || "Conjunto")}` : "";
         return `${escapeHtml(line.qty)}x ${escapeHtml(line.name)} (${formatMoney(line.unitPrice)})${origin}`;
       })
       .join("<br>");
@@ -1441,7 +1536,7 @@
         <div class="card-top">
           <div>
             <h3 class="card-title">Pedido ${escapeHtml(rental.orderNumber)}</h3>
-            <p class="card-subtitle">${escapeHtml(client?.name || "Cliente não encontrado")} · ${formatDate(rental.startDate)} a ${formatDate(rental.endDate)}</p>
+            <p class="card-subtitle">${escapeHtml(client?.name || "Cliente nÃ£o encontrado")} Â· ${formatDate(rental.startDate)} a ${formatDate(rental.endDate)}</p>
           </div>
           <div class="badge-row">
             <span class="badge ${statusClass}">${statusLabel(rental.status)}</span>
@@ -1458,7 +1553,7 @@
         ${kitSummary.length ? `<p class="muted-text"><strong>Conjuntos:</strong><br>${kitSummary.map((line) => `${escapeHtml(line.qty)}x ${escapeHtml(line.name)}`).join("<br>")}</p>` : ""}
         <p class="muted-text">${items}</p>
         ${rental.eventLocation ? `<p class="muted-text">Local: ${escapeHtml(rental.eventLocation)}</p>` : ""}
-        ${returnProblems ? `<p class="muted-text"><strong>Itens com problema na devolução:</strong><br>${returnProblems}</p>` : ""}
+        ${returnProblems ? `<p class="muted-text"><strong>Itens com problema na devoluÃ§Ã£o:</strong><br>${returnProblems}</p>` : ""}
         <div class="card-actions">
           <button type="button" data-action="receipt-rental" data-id="${rental.id}">Gerar contrato</button>
           <button type="button" data-action="edit-rental" data-id="${rental.id}">Editar</button>
@@ -1602,15 +1697,15 @@
     if (button.dataset.action === "delete-item") {
       const activeUse = state.rentals.some((rental) => ACTIVE_STATUSES.includes(rental.status) && rental.items.some((line) => Number(line.itemId) === id));
       if (activeUse) {
-        alert("Este item está em locação ativa. Finalize ou cancele os pedidos antes de excluir.");
+        alert("Este item estÃ¡ em locaÃ§Ã£o ativa. Finalize ou cancele os pedidos antes de excluir.");
         return;
       }
 
-      if (confirm(`Excluir o item "${item.name}"? Esta ação não pode ser desfeita.`)) {
+      if (confirm(`Excluir o item "${item.name}"? Esta aÃ§Ã£o nÃ£o pode ser desfeita.`)) {
         await PlanetaDB.remove("items", id);
         await loadAll();
         refreshAll();
-        showToast("Item excluído.");
+        showToast("Item excluÃ­do.");
       }
     }
   }
@@ -1668,11 +1763,11 @@
       return;
     }
 
-    if (button.dataset.action === "delete-kit" && confirm(`Excluir o conjunto "${kit.name}"? As locações já salvas não serão alteradas.`)) {
+    if (button.dataset.action === "delete-kit" && confirm(`Excluir o conjunto "${kit.name}"? As locaÃ§Ãµes jÃ¡ salvas nÃ£o serÃ£o alteradas.`)) {
       await PlanetaDB.remove("kits", Number(kit.id));
       await loadAll();
       refreshAll();
-      showToast("Conjunto excluído.");
+      showToast("Conjunto excluÃ­do.");
     }
   }
 
@@ -1711,7 +1806,7 @@
           <div id="kitItemsEditor" class="line-list"></div>
         </section>
         <label class="wide">
-          Observações
+          ObservaÃ§Ãµes
           <textarea name="notes" rows="3">${escapeHtml(kit?.notes || "")}</textarea>
         </label>
         <div class="form-actions wide">
@@ -1851,7 +1946,7 @@
     if (button.dataset.action === "delete-client") {
       const hasRentals = state.rentals.some((rental) => Number(rental.clientId) === id);
       if (hasRentals) {
-        alert("Este cliente tem histórico de locações. Edite o cadastro em vez de excluir.");
+        alert("Este cliente tem histÃ³rico de locaÃ§Ãµes. Edite o cadastro em vez de excluir.");
         return;
       }
 
@@ -1859,7 +1954,7 @@
         await PlanetaDB.remove("clients", id);
         await loadAll();
         refreshAll();
-        showToast("Cliente excluído.");
+        showToast("Cliente excluÃ­do.");
       }
     }
   }
@@ -1960,14 +2055,14 @@
 
   async function markDelivered(rental) {
     if (rental.status === "returned" || rental.status === "cancelled") {
-      alert("Este pedido já foi encerrado.");
+      alert("Este pedido jÃ¡ foi encerrado.");
       return;
     }
 
     const candidate = { ...rental, status: "delivered" };
     const shortages = checkRentalAvailability(candidate, rental.id);
     if (shortages.length) {
-      alert(`Não dá para marcar como entregue por falta de estoque:\n\n${shortages.join("\n")}`);
+      alert(`NÃ£o dÃ¡ para marcar como entregue por falta de estoque:\n\n${shortages.join("\n")}`);
       return;
     }
 
@@ -1985,19 +2080,19 @@
 
   function openReturnModal(rental) {
     if (rental.status === "returned") {
-      alert("Este pedido já foi marcado como devolvido.");
+      alert("Este pedido jÃ¡ foi marcado como devolvido.");
       return;
     }
 
     if (rental.status !== "delivered") {
-      alert("Marque o pedido como entregue/alugado antes de registrar a devolução.");
+      alert("Marque o pedido como entregue/alugado antes de registrar a devoluÃ§Ã£o.");
       return;
     }
 
     const rows = rental.items
       .map((line, index) => `
         <div class="return-row">
-          <strong>${escapeHtml(line.name)} · ${line.qty} alugado(s)</strong>
+          <strong>${escapeHtml(line.name)} Â· ${line.qty} alugado(s)</strong>
           <div class="form-grid">
             <label>
               Qtde com problema
@@ -2009,7 +2104,7 @@
                 <option value="Danificado">Danificado</option>
                 <option value="Quebrado">Quebrado</option>
                 <option value="Perdido">Perdido</option>
-                <option value="Indisponível">Indisponível</option>
+                <option value="IndisponÃ­vel">IndisponÃ­vel</option>
               </select>
             </label>
           </div>
@@ -2017,17 +2112,17 @@
       `)
       .join("");
 
-    openModal("Registrar devolução", `
+    openModal("Registrar devoluÃ§Ã£o", `
       <form id="returnForm">
-        <p class="muted-text">Informe somente os itens que voltaram quebrados, perdidos ou indisponíveis. O restante volta automaticamente para o estoque disponível.</p>
+        <p class="muted-text">Informe somente os itens que voltaram quebrados, perdidos ou indisponÃ­veis. O restante volta automaticamente para o estoque disponÃ­vel.</p>
         ${rows}
         <label class="wide">
-          Observação da devolução
+          ObservaÃ§Ã£o da devoluÃ§Ã£o
           <textarea id="returnNotes" rows="3" placeholder="Ex.: 1 forro manchado, 2 cadeiras quebradas"></textarea>
         </label>
         <div class="form-actions">
           <button class="secondary-action" type="button" data-close-modal="true">Cancelar</button>
-          <button class="primary-action red" type="submit">Confirmar devolução</button>
+          <button class="primary-action red" type="submit">Confirmar devoluÃ§Ã£o</button>
         </div>
       </form>
     `);
@@ -2079,7 +2174,7 @@
     closeModal();
     await loadAll();
     refreshAll();
-    showToast("Devolução registrada.");
+    showToast("DevoluÃ§Ã£o registrada.");
   }
 
   async function cancelRental(rental) {
@@ -2104,7 +2199,7 @@
       await PlanetaDB.remove("rentals", Number(rental.id));
       await loadAll();
       refreshAll();
-      showToast("Pedido excluído.");
+      showToast("Pedido excluÃ­do.");
     }
   }
 
@@ -2136,15 +2231,15 @@
           <input name="totalQty" type="number" min="0" inputmode="numeric" required value="${item?.totalQty ?? 0}">
         </label>
         <label>
-          Indisponível
+          IndisponÃ­vel
           <input name="unavailableQty" type="number" min="0" inputmode="numeric" value="${item?.unavailableQty ?? 0}">
         </label>
         <label>
-          Valor padrão
+          Valor padrÃ£o
           <input name="defaultPrice" type="number" min="0" step="0.01" inputmode="decimal" value="${item?.defaultPrice ?? 0}">
         </label>
         <label class="wide">
-          Observações
+          ObservaÃ§Ãµes
           <textarea name="notes" rows="3">${escapeHtml(item?.notes || "")}</textarea>
         </label>
         <div class="form-actions wide">
@@ -2198,6 +2293,9 @@
 
   function openItemDetailsModal(item) {
     const stats = getItemStats(item);
+    const { startDate, endDate } = getAvailabilityPeriod();
+    const periodStats = getItemAvailabilityForPeriod(item, startDate, endDate);
+    const conflictText = renderAvailabilityConflictText(item, periodStats.conflicts);
     const rentals = getItemRentalHistory(item.id);
     const rentalsHtml = rentals.length
       ? rentals
@@ -2237,16 +2335,19 @@
         </section>
 
         <section class="item-tab-panel hidden" data-item-tab-panel="stock">
+          <p class="muted-text">${escapeHtml(getAvailabilityPeriodLabel())}</p>
           <div class="metric-grid">
             <div class="metric"><span>Total cadastrado</span><strong>${stats.total}</strong></div>
-            <div class="metric"><span>Disponivel hoje</span><strong>${stats.availableToday}</strong></div>
-            <div class="metric"><span>Reservado hoje</span><strong>${stats.reservedToday}</strong></div>
-            <div class="metric"><span>Alugado/entregue hoje</span><strong>${stats.rentedToday}</strong></div>
+            <div class="metric"><span>Disponivel no periodo</span><strong>${periodStats.available}</strong></div>
+            <div class="metric"><span>Ocupado no periodo</span><strong>${periodStats.occupied}</strong></div>
+            <div class="metric"><span>Reservado no periodo</span><strong>${periodStats.reserved}</strong></div>
+            <div class="metric"><span>Entregue/alugado</span><strong>${periodStats.delivered}</strong></div>
             <div class="metric"><span>Reservado em datas futuras</span><strong>${stats.futureReserved}</strong></div>
             <div class="metric"><span>Proxima reserva</span><strong>${stats.nextReservationDate ? formatDate(stats.nextReservationDate) : "-"}</strong></div>
             <div class="metric"><span>Indisponivel</span><strong>${stats.unavailable}</strong></div>
             <div class="metric"><span>Devolvido</span><strong>${stats.returned}</strong></div>
           </div>
+          ${conflictText ? `<p class="muted-text"><strong>Uso no periodo:</strong><br>${conflictText}</p>` : `<p class="muted-text">Nenhuma locacao ocupando este item no periodo consultado.</p>`}
         </section>
 
         <section class="item-tab-panel hidden" data-item-tab-panel="rentals">
@@ -2362,11 +2463,11 @@
           <input name="document" type="text" value="${escapeAttr(client?.document || "")}">
         </label>
         <label class="wide">
-          Endereço
+          EndereÃ§o
           <input name="address" type="text" value="${escapeAttr(client?.address || "")}">
         </label>
         <label class="wide">
-          Observações
+          ObservaÃ§Ãµes
           <textarea name="notes" rows="3">${escapeHtml(client?.notes || "")}</textarea>
         </label>
         <div class="form-actions wide">
@@ -2437,8 +2538,8 @@
         <header class="receipt-header">
           <div class="brand-mark" aria-hidden="true">PL</div>
           <div>
-            <h2>Contrato de aluguel - Planeta Locações</h2>
-            <p class="muted-text">Eventos do seu jeito · Anápolis-GO · Pix: gv8407940@gmail.com</p>
+            <h2>Contrato de aluguel - Planeta LocaÃ§Ãµes</h2>
+            <p class="muted-text">Eventos do seu jeito Â· AnÃ¡polis-GO Â· Pix: gv8407940@gmail.com</p>
             <p class="muted-text">Titular do Pix: Gabriel Victor Souza Silva</p>
           </div>
         </header>
@@ -2450,13 +2551,13 @@
             <strong>Status:</strong> ${statusLabel(rental.status)}
           </div>
           <div>
-            <strong>Cliente:</strong> ${escapeHtml(client?.name || "Cliente não encontrado")}<br>
+            <strong>Cliente:</strong> ${escapeHtml(client?.name || "Cliente nÃ£o encontrado")}<br>
             <strong>Telefone:</strong> ${escapeHtml(client?.phone || "-")}<br>
             <strong>Documento:</strong> ${escapeHtml(client?.document || "-")}<br>
-            <strong>Endereço:</strong> ${escapeHtml(client?.address || "-")}
+            <strong>EndereÃ§o:</strong> ${escapeHtml(client?.address || "-")}
           </div>
           <div>
-            <strong>Período:</strong> ${formatDate(rental.startDate)} a ${formatDate(rental.endDate)}<br>
+            <strong>PerÃ­odo:</strong> ${formatDate(rental.startDate)} a ${formatDate(rental.endDate)}<br>
             <strong>Local:</strong> ${escapeHtml(rental.eventLocation || "-")}
           </div>
           <div>
@@ -2470,7 +2571,7 @@
             <tr>
               <th>Item</th>
               <th>Qtde</th>
-              <th>Unitário</th>
+              <th>UnitÃ¡rio</th>
               <th>Total</th>
             </tr>
           </thead>
@@ -2486,20 +2587,20 @@
           <div class="totals-row"><span>Restante</span><strong>${formatMoney(totals.remaining)}</strong></div>
         </div>
 
-        ${rental.notes ? `<p><strong>Observações:</strong> ${escapeHtml(rental.notes)}</p>` : ""}
-        ${returnProblems ? `<p><strong>Itens com problema na devolução:</strong></p><ul>${returnProblems}</ul>` : ""}
-        ${rental.returnNotes ? `<p><strong>Observação da devolução:</strong> ${escapeHtml(rental.returnNotes)}</p>` : ""}
+        ${rental.notes ? `<p><strong>ObservaÃ§Ãµes:</strong> ${escapeHtml(rental.notes)}</p>` : ""}
+        ${returnProblems ? `<p><strong>Itens com problema na devoluÃ§Ã£o:</strong></p><ul>${returnProblems}</ul>` : ""}
+        ${rental.returnNotes ? `<p><strong>ObservaÃ§Ã£o da devoluÃ§Ã£o:</strong> ${escapeHtml(rental.returnNotes)}</p>` : ""}
 
         <div class="terms-box">
-          <strong>Condições do aluguel:</strong>
-          O locatário declara receber os itens listados acima para uso no período informado e se responsabiliza pela devolução nas mesmas condições de entrega.
-          Danos, perdas, quebras, manchas ou extravios poderão ser cobrados conforme avaliação do locador.
+          <strong>CondiÃ§Ãµes do aluguel:</strong>
+          O locatÃ¡rio declara receber os itens listados acima para uso no perÃ­odo informado e se responsabiliza pela devoluÃ§Ã£o nas mesmas condiÃ§Ãµes de entrega.
+          Danos, perdas, quebras, manchas ou extravios poderÃ£o ser cobrados conforme avaliaÃ§Ã£o do locador.
           O valor total, sinal e restante seguem o combinado neste contrato.
         </div>
 
         <div class="signature-row">
           <div class="signature-line">Locador</div>
-          <div class="signature-line">Locatário</div>
+          <div class="signature-line">LocatÃ¡rio</div>
         </div>
       </div>
 
@@ -2521,7 +2622,7 @@
 
       openModal("Contrato de aluguel", `
         <div class="contract-preview-wrap">
-          <iframe id="contractPreviewFrame" class="contract-frame" title="Prévia do contrato de aluguel"></iframe>
+          <iframe id="contractPreviewFrame" class="contract-frame" title="PrÃ©via do contrato de aluguel"></iframe>
         </div>
         <div class="form-actions no-print">
           <button class="secondary-action" type="button" data-close-modal="true">Fechar</button>
@@ -2536,7 +2637,7 @@
       $("#shareReceiptBtn").addEventListener("click", () => shareReceipt(rental, client));
     } catch (error) {
       console.error(error);
-      alert("Não foi possível gerar o contrato. Verifique se o template oficial está no projeto.");
+      alert("NÃ£o foi possÃ­vel gerar o contrato. Verifique se o template oficial estÃ¡ no projeto.");
     }
   }
 
@@ -2547,7 +2648,7 @@
 
     const response = await fetch(CONTRACT_TEMPLATE_URL);
     if (!response.ok) {
-      throw new Error("Template oficial do contrato não encontrado.");
+      throw new Error("Template oficial do contrato nÃ£o encontrado.");
     }
 
     state.contractTemplate = await response.text();
@@ -2613,7 +2714,7 @@
       String(rental.eventLocation || "").length;
 
     return {
-      numero_contrato: escapeHtml(rental.orderNumber || "Prévia"),
+      numero_contrato: escapeHtml(rental.orderNumber || "PrÃ©via"),
       data_emissao: formatDate(todayISO()),
       nome_cliente: escapeHtml(client?.name || ""),
       telefone_cliente: escapeHtml(client?.phone || ""),
@@ -2686,7 +2787,7 @@
 
   function printContractFrame(frame) {
     if (!frame?.contentWindow) {
-      alert("A prévia do contrato ainda não carregou. Tente novamente em alguns segundos.");
+      alert("A prÃ©via do contrato ainda nÃ£o carregou. Tente novamente em alguns segundos.");
       return;
     }
 
@@ -2697,10 +2798,10 @@
   async function shareReceipt(rental, client) {
     const totals = getRentalTotals(rental);
     const text = [
-      "Contrato de aluguel - Planeta Locações",
+      "Contrato de aluguel - Planeta LocaÃ§Ãµes",
       `Pedido ${rental.orderNumber}`,
       `Cliente: ${client?.name || "-"}`,
-      `Período: ${formatDate(rental.startDate)} a ${formatDate(rental.endDate)}`,
+      `PerÃ­odo: ${formatDate(rental.startDate)} a ${formatDate(rental.endDate)}`,
       `Subtotal dos itens: ${formatMoney(totals.subtotal)}`,
       `Frete: ${formatMoney(totals.freight)}`,
       `Total: ${formatMoney(totals.total)}`,
@@ -2711,7 +2812,7 @@
 
     if (navigator.share) {
       await navigator.share({
-        title: `Contrato ${rental.orderNumber} - Planeta Locações`,
+        title: `Contrato ${rental.orderNumber} - Planeta LocaÃ§Ãµes`,
         text,
       });
       return;
@@ -2786,7 +2887,7 @@
         <div class="card-top">
           <div>
             <h3 class="card-title">${escapeHtml(expense.description || "Gasto")}</h3>
-            <p class="card-subtitle">${formatDate(getExpenseDate(expense))} · ${escapeHtml(expense.category || "Sem categoria")}</p>
+            <p class="card-subtitle">${formatDate(getExpenseDate(expense))} Â· ${escapeHtml(expense.category || "Sem categoria")}</p>
           </div>
           <div class="badge-row">
             <span class="badge ${normalizeExpenseType(expense) === "investment" ? "" : "yellow"}">${expenseTypeLabel(normalizeExpenseType(expense))}</span>
@@ -2812,7 +2913,7 @@
 
   function renderFinanceFilters() {
     const categories = uniqueValues([
-      "Locações",
+      "LocaÃ§Ãµes",
       ...state.expenses.map((expense) => expense.category || "Sem categoria"),
     ]);
     fillSelect($("#financeCategoryFilter"), categories, "Todas");
@@ -2848,7 +2949,7 @@
 
     $("#financeStats").innerHTML = [
       ["Total de entradas", formatMoney(incomeTotal)],
-      ["Locações a receber", formatMoney(receivableTotal)],
+      ["LocaÃ§Ãµes a receber", formatMoney(receivableTotal)],
       ["Total de gastos", formatMoney(investmentTotal + costTotal)],
       ["Total de investimentos", formatMoney(investmentTotal)],
       ["Total de custos", formatMoney(costTotal)],
@@ -2865,7 +2966,7 @@
     $("#overdueFinanceList").innerHTML = renderOverdueExpenses();
     $("#financeList").innerHTML = movements.length
       ? movements.map(renderFinanceMovementCard).join("")
-      : emptyState("Nenhuma movimentação encontrada para os filtros escolhidos.");
+      : emptyState("Nenhuma movimentaÃ§Ã£o encontrada para os filtros escolhidos.");
     renderFinanceCharts(movements, {
       incomeTotal,
       investmentTotal,
@@ -2984,7 +3085,7 @@
           <div class="legend-item">
             <span class="legend-swatch" style="background:${row.color}"></span>
             <strong>${escapeHtml(row.label)}</strong>
-            <span>${formatMoney(row.value)} · ${percent}%</span>
+            <span>${formatMoney(row.value)} Â· ${percent}%</span>
           </div>
         `;
       })
@@ -3001,10 +3102,10 @@
         const receivableAmount = getRentalReceivableAmount(rental);
         const baseMovement = {
           source: "rental",
-          category: "Locações",
+          category: "LocaÃ§Ãµes",
           date: rental.startDate || rental.orderDate,
           title: `Pedido ${rental.orderNumber}`,
-          clientName: client?.name || "Cliente não encontrado",
+          clientName: client?.name || "Cliente nÃ£o encontrado",
           itemText: (Array.isArray(rental.items) ? rental.items : []).map((line) => `${line.qty}x ${line.name}`).join(", "),
           startDate: rental.startDate,
           endDate: rental.endDate,
@@ -3044,7 +3145,7 @@
       expenseType: normalizeExpenseType(expense),
       date: getExpenseDate(expense),
       amount: toNumber(expense.amount),
-      title: expense.description || "Gasto sem descrição",
+      title: expense.description || "Gasto sem descriÃ§Ã£o",
       paymentMethod: expense.paymentMethod || "-",
       status: expenseEffectiveStatus(expense),
       notes: expense.notes || "",
@@ -3103,7 +3204,7 @@
           <div class="card-top">
             <div>
               <h3 class="card-title">${isReceived ? "Entrada" : "A receber"} - ${escapeHtml(movement.title)}</h3>
-              <p class="card-subtitle">${escapeHtml(movement.clientName)} · ${formatDate(movement.startDate)} a ${formatDate(movement.endDate)}</p>
+              <p class="card-subtitle">${escapeHtml(movement.clientName)} Â· ${formatDate(movement.startDate)} a ${formatDate(movement.endDate)}</p>
             </div>
             <div class="badge-row">
               <span class="badge ${isReceived ? "green" : "yellow"}">${FINANCE_TYPE[movement.type]}</span>
@@ -3112,7 +3213,7 @@
           </div>
           <div class="metric-grid">
             <div class="metric"><span>${isReceived ? "Valor recebido" : "Valor a receber"}</span><strong>${formatMoney(movement.amount)}</strong></div>
-            <div class="metric"><span>Total da locação</span><strong>${formatMoney(movement.rentalTotal)}</strong></div>
+            <div class="metric"><span>Total da locaÃ§Ã£o</span><strong>${formatMoney(movement.rentalTotal)}</strong></div>
             <div class="metric"><span>Pagamento</span><strong>${escapeHtml(movement.paymentMethod)}</strong></div>
             <div class="metric"><span>Data</span><strong>${formatDate(movement.date)}</strong></div>
             <div class="metric"><span>Categoria</span><strong>${escapeHtml(movement.category)}</strong></div>
@@ -3128,7 +3229,7 @@
         <div class="card-top">
           <div>
             <h3 class="card-title">${escapeHtml(movement.title)}</h3>
-            <p class="card-subtitle">${escapeHtml(movement.category)} · ${formatDate(movement.date)}</p>
+            <p class="card-subtitle">${escapeHtml(movement.category)} Â· ${formatDate(movement.date)}</p>
           </div>
           <div class="badge-row">
             <span class="badge ${movement.expenseType === "investment" ? "" : "yellow"}">${expenseTypeLabel(movement.expenseType)}</span>
@@ -3169,7 +3270,7 @@
         <div class="compact-item">
           <div>
             <strong>${escapeHtml(expense.description || "Gasto")}</strong>
-            <span>${formatDate(getExpenseDate(expense))} · ${escapeHtml(expense.category || "Sem categoria")}</span>
+            <span>${formatDate(getExpenseDate(expense))} Â· ${escapeHtml(expense.category || "Sem categoria")}</span>
           </div>
           <span>${formatMoney(expense.amount)}</span>
         </div>
@@ -3240,7 +3341,7 @@
     openModal(title, `
       <form id="expenseForm" class="form-grid">
         <label class="wide">
-          Descrição do gasto
+          DescriÃ§Ã£o do gasto
           <input name="description" type="text" required value="${escapeAttr(expense?.description || "")}">
         </label>
         <label>
@@ -3252,10 +3353,10 @@
         </label>
         <label>
           Categoria
-          <input name="category" type="text" list="expenseCategoryOptions" value="${escapeAttr(expense?.category || "")}" placeholder="Ex.: Manutenção">
+          <input name="category" type="text" list="expenseCategoryOptions" value="${escapeAttr(expense?.category || "")}" placeholder="Ex.: ManutenÃ§Ã£o">
           <datalist id="expenseCategoryOptions">
             <option value="Compra de equipamentos"></option>
-            <option value="Manutenção"></option>
+            <option value="ManutenÃ§Ã£o"></option>
             <option value="Transporte"></option>
             <option value="Limpeza"></option>
             <option value="Taxas"></option>
@@ -3273,7 +3374,7 @@
         <label>
           Forma de pagamento
           <select name="paymentMethod">
-            ${["Pix", "Dinheiro", "Cartão", "Boleto", "Outro"].map((method) => `<option ${method === (expense?.paymentMethod || "Pix") ? "selected" : ""}>${method}</option>`).join("")}
+            ${["Pix", "Dinheiro", "CartÃ£o", "Boleto", "Outro"].map((method) => `<option ${method === (expense?.paymentMethod || "Pix") ? "selected" : ""}>${method}</option>`).join("")}
           </select>
         </label>
         <label>
@@ -3286,7 +3387,7 @@
         </label>
         ${isInstallment ? `<p class="muted-text wide">Parcela ${expense.installmentNumber || "-"} de ${expense.installmentTotal || "-"}</p>` : ""}
         <label class="wide">
-          Observações
+          ObservaÃ§Ãµes
           <textarea name="notes" rows="3">${escapeHtml(expense?.notes || "")}</textarea>
         </label>
         <div class="form-actions wide">
@@ -3336,7 +3437,7 @@
       }
 
       if (!payload.description || !payload.amount || !form.date.value) {
-        alert("Informe descrição, valor e data do gasto.");
+        alert("Informe descriÃ§Ã£o, valor e data do gasto.");
         return;
       }
 
@@ -3366,7 +3467,7 @@
     openModal("Cadastrar gasto parcelado", `
       <form id="installmentForm" class="form-grid">
         <label class="wide">
-          Descrição
+          DescriÃ§Ã£o
           <input name="description" type="text" required placeholder="Ex.: Compra de mesas e cadeiras" value="${escapeAttr(draft.description || "")}">
         </label>
         <label>
@@ -3397,7 +3498,7 @@
           <input name="amount" type="number" min="0" step="0.01" inputmode="decimal" readonly>
         </label>
         <label>
-          Vencimento das próximas parcelas
+          Vencimento das prÃ³ximas parcelas
           <select name="frequency">
             <option value="monthly">Mensal, no mesmo dia</option>
           </select>
@@ -3405,7 +3506,7 @@
         <label>
           Forma de pagamento
           <select name="paymentMethod">
-            ${["Pix", "Dinheiro", "Cartão", "Boleto", "Outro"].map((method) => `<option ${method === (draft.paymentMethod || "Pix") ? "selected" : ""}>${method}</option>`).join("")}
+            ${["Pix", "Dinheiro", "CartÃ£o", "Boleto", "Outro"].map((method) => `<option ${method === (draft.paymentMethod || "Pix") ? "selected" : ""}>${method}</option>`).join("")}
           </select>
         </label>
         <label>
@@ -3416,7 +3517,7 @@
           </select>
         </label>
         <label class="wide">
-          Observações
+          ObservaÃ§Ãµes
           <textarea name="notes" rows="3">${escapeHtml(draft.notes || "")}</textarea>
         </label>
         <div class="form-actions wide">
@@ -3443,7 +3544,7 @@
       const baseAmount = roundMoney(totalAmountValue / total);
 
       if (!form.description.value.trim() || !totalAmountValue || !form.dueDate.value) {
-        alert("Confira descrição, valor total, quantidade e primeiro vencimento das parcelas.");
+        alert("Confira descriÃ§Ã£o, valor total, quantidade e primeiro vencimento das parcelas.");
         return;
       }
 
@@ -3499,7 +3600,7 @@
       await PlanetaDB.remove("expenses", Number(expense.id));
       await loadAll();
       refreshAll();
-      showToast("Gasto excluído.");
+      showToast("Gasto excluÃ­do.");
     }
   }
 
@@ -3533,7 +3634,7 @@
         const data = JSON.parse(reader.result);
         const summary = summarizeBackupData(data);
         const choice = prompt(
-          `Backup compatível encontrado.\n\n${summary}\n\nDigite MESCLAR para acrescentar sem apagar os dados atuais.\nDigite SUBSTITUIR para apagar os dados atuais e usar somente o backup.`
+          `Backup compatÃ­vel encontrado.\n\n${summary}\n\nDigite MESCLAR para acrescentar sem apagar os dados atuais.\nDigite SUBSTITUIR para apagar os dados atuais e usar somente o backup.`
         );
         const mode = String(choice || "").trim().toUpperCase();
 
@@ -3542,7 +3643,7 @@
         }
 
         if (mode !== "MESCLAR" && mode !== "SUBSTITUIR") {
-          alert("Importação cancelada. Use MESCLAR ou SUBSTITUIR.");
+          alert("ImportaÃ§Ã£o cancelada. Use MESCLAR ou SUBSTITUIR.");
           return;
         }
 
@@ -3559,7 +3660,7 @@
         showToast(mode === "MESCLAR" ? "Backup mesclado." : "Backup importado.");
       } catch (error) {
         console.error(error);
-        alert("Não foi possível importar o arquivo. Verifique se é um backup JSON válido.");
+        alert("NÃ£o foi possÃ­vel importar o arquivo. Verifique se Ã© um backup JSON vÃ¡lido.");
       } finally {
         event.target.value = "";
       }
@@ -3569,13 +3670,13 @@
 
   function summarizeBackupData(data) {
     if (!data || typeof data !== "object" || !data.stores || typeof data.stores !== "object") {
-      throw new Error("Arquivo de backup inválido.");
+      throw new Error("Arquivo de backup invÃ¡lido.");
     }
 
     const requiredStores = ["items", "clients", "rentals", "expenses"];
     const invalidStore = requiredStores.find((store) => data.stores[store] && !Array.isArray(data.stores[store]));
     if (invalidStore) {
-      throw new Error(`Backup incompatível: ${invalidStore}.`);
+      throw new Error(`Backup incompatÃ­vel: ${invalidStore}.`);
     }
 
     const counts = {
@@ -3590,7 +3691,7 @@
       `Itens/produtos: ${counts.items}`,
       `Conjuntos/kits: ${counts.kits}`,
       `Clientes: ${counts.clients}`,
-      `Locações: ${counts.rentals}`,
+      `LocaÃ§Ãµes: ${counts.rentals}`,
       `Gastos/parcelas: ${counts.expenses}`,
     ].join("\n");
   }
@@ -3603,8 +3704,8 @@
 
     const activeRentals = state.rentals.filter((rental) => ACTIVE_STATUSES.includes(rental.status)).length;
     const warning = activeRentals
-      ? `Existem ${activeRentals} locação(ões) ativa(s). Os pedidos continuam salvos, mas o estoque será apagado deste aparelho.`
-      : "Clientes, locações e gastos não serão apagados.";
+      ? `Existem ${activeRentals} locaÃ§Ã£o(Ãµes) ativa(s). Os pedidos continuam salvos, mas o estoque serÃ¡ apagado deste aparelho.`
+      : "Clientes, locaÃ§Ãµes e gastos nÃ£o serÃ£o apagados.";
     const answer = prompt(`${warning}\n\nDigite ESTOQUE para limpar apenas os itens cadastrados no estoque.`);
 
     if (answer !== "ESTOQUE") {
@@ -3639,7 +3740,7 @@
 
   async function renderBackup() {
     const lastBackup = await PlanetaDB.getMeta("lastBackupAt", null);
-    $("#lastBackupInfo").textContent = lastBackup ? `Último backup: ${formatDateTime(lastBackup)}` : "Nenhum backup exportado neste aparelho.";
+    $("#lastBackupInfo").textContent = lastBackup ? `Ãšltimo backup: ${formatDateTime(lastBackup)}` : "Nenhum backup exportado neste aparelho.";
   }
 
   function getItemStats(item) {
@@ -3677,6 +3778,71 @@
     stats.nextReservationDate = future.nextDate;
     stats.availableToday = Math.max(0, stats.total - stats.unavailable - stats.reservedToday - stats.rentedToday);
     return stats;
+  }
+
+  function getItemAvailabilityForPeriod(item, startDate, endDate, ignoreRentalId = null) {
+    const safeStart = startDate || todayISO();
+    const safeEnd = endDate || safeStart;
+    const conflicts = getItemPeriodConflicts(item, safeStart, safeEnd, ignoreRentalId);
+    const reserved = conflicts
+      .filter((conflict) => conflict.rental.status === "reserved")
+      .reduce((sum, conflict) => sum + conflict.qty, 0);
+    const delivered = conflicts
+      .filter((conflict) => conflict.rental.status === "delivered")
+      .reduce((sum, conflict) => sum + conflict.qty, 0);
+    const occupied = reserved + delivered;
+    const total = Number(item?.totalQty) || 0;
+    const unavailable = Number(item?.unavailableQty) || 0;
+
+    return {
+      total,
+      unavailable,
+      reserved,
+      delivered,
+      occupied,
+      available: Math.max(0, total - unavailable - occupied),
+      conflicts,
+    };
+  }
+
+  function renderAvailabilityConflictText(item, conflicts) {
+    if (!Array.isArray(conflicts) || !conflicts.length) {
+      return "";
+    }
+
+    return conflicts
+      .slice(0, 4)
+      .map(({ rental, qty }) => {
+        const client = getClient(rental.clientId);
+        return `${escapeHtml(qty)} ${escapeHtml(item?.name || "item")} - pedido ${escapeHtml(rental.orderNumber || "-")} - ${escapeHtml(client?.name || "cliente")} - ${formatDate(rental.startDate)} ate ${formatDate(rental.endDate)}`;
+      })
+      .join("<br>");
+  }
+
+  function getKitAvailabilityForPeriod(kit, startDate, endDate) {
+    const components = Array.isArray(kit?.items) ? kit.items : [];
+    if (!components.length) {
+      return { available: 0, limitingItem: "" };
+    }
+
+    const componentAvailability = components
+      .map((component) => {
+        const item = getItem(component.itemId);
+        const qtyPerKit = Math.max(1, toNumber(component.qty));
+        const stats = item ? getItemAvailabilityForPeriod(item, startDate, endDate) : null;
+        return {
+          item,
+          qtyPerKit,
+          possible: stats ? Math.floor(stats.available / qtyPerKit) : 0,
+        };
+      });
+
+    const limiting = componentAvailability.reduce((lowest, current) => (current.possible < lowest.possible ? current : lowest), componentAvailability[0]);
+
+    return {
+      available: Math.max(0, limiting?.possible || 0),
+      limitingItem: limiting?.item?.name || "Item removido",
+    };
   }
 
   function getFutureReservationStats(item, today) {
@@ -3763,7 +3929,7 @@
     requestedByItem.forEach((qty, itemId) => {
       const item = getItem(itemId);
       if (!item) {
-        shortages.push(`Item ${itemId} não encontrado.`);
+        shortages.push(`Item ${itemId} nÃ£o encontrado.`);
         return;
       }
 
@@ -3771,7 +3937,7 @@
       if (qty > available) {
         const conflicts = formatPeriodConflictSummary(item, rental.startDate, rental.endDate, ignoreRentalId);
         shortages.push(
-          `${item.name}: pedido ${qty}, disponível ${available} de ${Number(item.totalQty) || 0} no período.${conflicts ? ` Já existem ${conflicts}.` : ""}`
+          `${item.name}: pedido ${qty}, disponÃ­vel ${available} de ${Number(item.totalQty) || 0} no perÃ­odo.${conflicts ? ` JÃ¡ existem ${conflicts}.` : ""}`
         );
       }
     });
@@ -3802,7 +3968,7 @@
       if (qty > available) {
         const conflicts = formatPeriodConflictSummary(item, startDate, endDate, state.editingRentalId);
         shortages.push(
-          `${item.name}: pedido ${qty}, disponível ${available} de ${Number(item.totalQty) || 0} no período.${conflicts ? ` Já existem ${conflicts}.` : ""}`
+          `${item.name}: pedido ${qty}, disponÃ­vel ${available} de ${Number(item.totalQty) || 0} no perÃ­odo.${conflicts ? ` JÃ¡ existem ${conflicts}.` : ""}`
         );
       }
     });
@@ -3841,7 +4007,7 @@
         <section class="modal-card" role="dialog" aria-modal="true" aria-label="${escapeAttr(title)}">
           <div class="modal-head">
             <h2>${escapeHtml(title)}</h2>
-            <button class="close-btn" type="button" data-close-modal="true" aria-label="Fechar">×</button>
+            <button class="close-btn" type="button" data-close-modal="true" aria-label="Fechar">Ã—</button>
           </div>
           <div class="modal-body">${content}</div>
         </section>
@@ -3935,7 +4101,7 @@
       phone: clientDraft.phone,
       document: clientDraft.document,
       address: clientDraft.address,
-      notes: "Criado automaticamente pela locação.",
+      notes: "Criado automaticamente pela locaÃ§Ã£o.",
       createdAt: now,
       updatedAt: now,
     };
@@ -3956,7 +4122,7 @@
     }
 
     if (!isValidCpf(cpfDigits)) {
-      info.textContent = "CPF inválido. Confira os 11 dígitos antes de salvar a locação.";
+      info.textContent = "CPF invÃ¡lido. Confira os 11 dÃ­gitos antes de salvar a locaÃ§Ã£o.";
       return;
     }
 
@@ -3964,7 +4130,7 @@
     const client = findClientByCpfDigits(cpfDigits);
 
     if (!client) {
-      info.textContent = "CPF válido. Um novo cliente será criado ao salvar a locação.";
+      info.textContent = "CPF vÃ¡lido. Um novo cliente serÃ¡ criado ao salvar a locaÃ§Ã£o.";
       return;
     }
 
@@ -4076,10 +4242,10 @@
     }
 
     if (value === addDaysToISODate(today, 1)) {
-      return "Amanhã";
+      return "AmanhÃ£";
     }
 
-    return "Depois de amanhã";
+    return "Depois de amanhÃ£";
   }
 
   function formatDate(value) {
@@ -4230,3 +4396,4 @@
     });
   }
 })();
+
