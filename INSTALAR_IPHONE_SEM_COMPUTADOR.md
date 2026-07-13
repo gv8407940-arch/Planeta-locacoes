@@ -28,7 +28,7 @@ Depois da primeira abertura, o service worker guarda os arquivos principais para
 7. Abra no iPhone um endereco parecido com:
 
 ```text
-https://SEU-USUARIO.github.io/planeta-locacoes/index.html?v=23
+https://SEU-USUARIO.github.io/planeta-locacoes/index.html?v=28
 ```
 
 ## Levando dados do computador para o iPhone
@@ -76,7 +76,7 @@ Altere a versao do cache quando mudar qualquer arquivo essencial, como:
 Exemplo:
 
 ```text
-planeta-locacoes-v23
+planeta-locacoes-v28
 ```
 
 Depois de publicar a nova versao:

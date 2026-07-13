@@ -55,6 +55,27 @@ button {
   background: linear-gradient(135deg, var(--blue), var(--blue-dark));
 }
 
+.menu-toggle {
+  display: grid;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  gap: 5px;
+  padding: 11px 9px;
+  place-content: center;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 8px;
+}
+
+.menu-toggle span {
+  display: block;
+  width: 22px;
+  height: 2px;
+  background: #ffffff;
+  border-radius: 2px;
+}
+
 .brand-mark {
   display: grid;
   flex: 0 0 48px;
@@ -96,28 +117,80 @@ button {
   opacity: 0.9;
 }
 
-.app-nav {
-  position: sticky;
-  top: 0;
-  z-index: 20;
+.menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  visibility: hidden;
+  background: rgba(9, 18, 36, 0.45);
+  opacity: 0;
+  transition: opacity 180ms ease, visibility 180ms ease;
+}
+
+.menu-overlay.is-visible {
+  visibility: visible;
+  opacity: 1;
+}
+
+.app-menu {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 90;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(336px, calc(100vw - 44px));
+  max-width: 100%;
+  visibility: hidden;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 14px 0 34px rgba(9, 18, 36, 0.22);
+  transform: translateX(-105%);
+  transition: transform 180ms ease, visibility 180ms ease;
+}
+
+.app-menu.is-open {
+  visibility: visible;
+  transform: translateX(0);
+}
+
+.app-menu-head {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  color: #ffffff;
+  background: var(--blue-dark);
+}
+
+.app-menu-head strong {
+  font-size: 1.1rem;
+}
+
+.app-menu-head .close-btn {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.55);
+}
+
+.app-nav {
+  display: grid;
+  align-content: start;
   gap: 8px;
-  overflow-x: auto;
-  padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.96);
-  border-bottom: 1px solid var(--line);
-  box-shadow: 0 4px 16px rgba(23, 32, 51, 0.05);
+  padding: 12px;
+  overflow-y: auto;
 }
 
 .nav-btn {
-  flex: 0 0 auto;
-  min-height: 42px;
+  width: 100%;
+  min-height: 48px;
   padding: 0 14px;
   color: var(--blue-dark);
   background: #eef4ff;
   border: 1px solid #d6e5ff;
   border-radius: 8px;
   font-weight: 700;
+  text-align: left;
 }
 
 .nav-btn.active {
@@ -332,6 +405,52 @@ main {
 
 .toolbar.single {
   grid-template-columns: 1fr;
+}
+
+.finance-period-range {
+  margin: 4px 0 0;
+  font-weight: 700;
+}
+
+.finance-period-panel {
+  margin-bottom: 14px;
+}
+
+.finance-period-modes,
+.finance-preset-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.finance-period-mode,
+.finance-preset-btn {
+  min-height: 46px;
+  padding: 8px 10px;
+  color: var(--blue-dark);
+  background: #eef4ff;
+  border: 1px solid #d6e5fb;
+  border-radius: 8px;
+  font-weight: 800;
+}
+
+.finance-period-mode.active,
+.finance-preset-btn.active {
+  color: #ffffff;
+  background: var(--blue);
+  border-color: var(--blue);
+}
+
+.finance-period-controls {
+  margin-top: 12px;
+}
+
+.finance-period-controls label {
+  max-width: 360px;
+}
+
+.finance-detail-filters {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .availability-panel {
@@ -1176,7 +1295,8 @@ textarea:focus {
   transform: translateY(0);
 }
 
-body.modal-open {
+body.modal-open,
+body.menu-open {
   overflow: hidden;
 }
 
@@ -1189,8 +1309,8 @@ body.modal-open {
     font-size: 1.55rem;
   }
 
-  .app-nav {
-    justify-content: center;
+  .app-menu {
+    width: 360px;
   }
 
   main {
@@ -1207,6 +1327,14 @@ body.modal-open {
 
   .toolbar {
     grid-template-columns: minmax(220px, 1.4fr) minmax(150px, 0.9fr) minmax(150px, 0.9fr) minmax(220px, auto);
+  }
+
+  .finance-period-panel {
+    width: min(660px, 100%);
+  }
+
+  .finance-detail-filters {
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
   }
 
   .availability-query {
@@ -1263,6 +1391,30 @@ body.modal-open {
 }
 
 @media (max-width: 520px) {
+  .topbar {
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .brand-mark {
+    flex-basis: 42px;
+    width: 42px;
+    height: 42px;
+  }
+
+  .brand-copy p,
+  .brand-copy span {
+    font-size: 0.74rem;
+  }
+
+  .brand-copy h1 {
+    font-size: 1.08rem;
+  }
+
+  .kpi-grid .kpi-card:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+
   .section-head {
     align-items: stretch;
     flex-direction: column;

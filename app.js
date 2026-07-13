@@ -3,14 +3,14 @@
 
   const ACTIVE_STATUSES = ["reserved", "delivered"];
   const RENTAL_STATUS = {
-    quote: "OrÃ§amento",
+    quote: "Orçamento",
     reserved: "Reservado",
     delivered: "Entregue/alugado",
     returned: "Devolvido",
     cancelled: "Cancelado",
   };
   const PAYMENT_STATUS = {
-    unpaid: "NÃ£o pago",
+    unpaid: "Não pago",
     partial: "Sinal pago",
     paid: "Pago completo",
   };
@@ -31,8 +31,13 @@
     "pending-expense": "Gasto pendente",
     "future-expense": "Gasto futuro",
   };
-  const DASHBOARD_STATUS_ORDER = ["reserved", "delivered", "returned", "cancelled"];
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=23";
+  const FINANCE_PERIOD_PRESETS = {
+    "30d": { label: "último mês", days: 30 },
+    "3m": { label: "últimos 3 meses", months: 3 },
+    "6m": { label: "últimos 6 meses", months: 6 },
+    "12m": { label: "últimos 12 meses", months: 12 },
+  };
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=28";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -62,6 +67,9 @@
     dailyPricingRows: [],
     availabilityStartDate: "",
     availabilityEndDate: "",
+    financePeriodMode: "month",
+    financeMonth: "",
+    financePreset: "30d",
   };
 
   const moneyFormatter = new Intl.NumberFormat("pt-BR", {
@@ -82,6 +90,7 @@
       await migrateFinanceData();
       await loadPreferences();
       resetAvailabilityPeriod();
+      resetFinancePeriod();
       bindEvents();
       await loadAll();
       startNewRental();
@@ -91,13 +100,21 @@
 
     } catch (error) {
       console.error(error);
-      alert("NÃ£o foi possÃ­vel iniciar o sistema local. Verifique se o navegador permite IndexedDB.");
+      alert("Não foi possível iniciar o sistema local. Verifique se o navegador permite IndexedDB.");
     }
   }
 
   function bindEvents() {
     $$(".nav-btn").forEach((button) => {
       button.addEventListener("click", () => showView(button.dataset.view));
+    });
+    $("#menuToggle").addEventListener("click", toggleAppMenu);
+    $("#menuClose").addEventListener("click", closeAppMenu);
+    $("#menuOverlay").addEventListener("click", closeAppMenu);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closeAppMenu();
+      }
     });
 
     $$("[data-shortcut-view]").forEach((button) => {
@@ -134,17 +151,16 @@
     $("#expenseTypeFilter").addEventListener("change", renderExpenses);
     $("#expenseStatusFilter").addEventListener("change", renderExpenses);
     $("#expenseCategoryFilter").addEventListener("change", renderExpenses);
-    $("#financeStartFilter").addEventListener("change", renderFinance);
-    $("#financeEndFilter").addEventListener("change", renderFinance);
-    $("#financeMonthFilter").addEventListener("change", renderFinance);
-    $("#financeYearFilter").addEventListener("input", renderFinance);
+    $$("[data-finance-period-mode]").forEach((button) => {
+      button.addEventListener("click", () => setFinancePeriodMode(button.dataset.financePeriodMode));
+    });
+    $$("[data-finance-preset]").forEach((button) => {
+      button.addEventListener("click", () => setFinancePreset(button.dataset.financePreset));
+    });
+    $("#financeMonthPicker").addEventListener("change", handleFinanceMonthChange);
     $("#financeTypeFilter").addEventListener("change", renderFinance);
     $("#financeCategoryFilter").addEventListener("change", renderFinance);
 
-    $("#inventorySummary").addEventListener("click", handleItemSurfaceClick);
-    $("#inventorySummary").addEventListener("keydown", handleItemSurfaceKeydown);
-    $("#dashboardStatusBoards").addEventListener("click", handleDashboardStatusClick);
-    $("#dashboardStatusBoards").addEventListener("keydown", handleDashboardStatusKeydown);
     $("#stockList").addEventListener("click", handleStockClick);
     $("#stockList").addEventListener("keydown", handleItemSurfaceKeydown);
     $("#kitsList").addEventListener("click", handleKitClick);
@@ -322,6 +338,7 @@
   }
 
   function showView(viewName) {
+    closeAppMenu();
     $$(".view").forEach((view) => view.classList.toggle("active", view.id === `view-${viewName}`));
     $$(".nav-btn").forEach((button) => button.classList.toggle("active", button.dataset.view === viewName));
     if (viewName === "expenses") {
@@ -331,6 +348,27 @@
       renderFinance();
     }
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function toggleAppMenu() {
+    setAppMenuOpen(!$("#appMenu").classList.contains("is-open"));
+  }
+
+  function closeAppMenu() {
+    setAppMenuOpen(false);
+  }
+
+  function setAppMenuOpen(isOpen) {
+    const menu = $("#appMenu");
+    const overlay = $("#menuOverlay");
+    const toggle = $("#menuToggle");
+    menu.classList.toggle("is-open", isOpen);
+    overlay.classList.toggle("is-visible", isOpen);
+    menu.setAttribute("aria-hidden", String(!isOpen));
+    overlay.setAttribute("aria-hidden", String(!isOpen));
+    toggle.setAttribute("aria-expanded", String(isOpen));
+    toggle.setAttribute("aria-label", isOpen ? "Fechar menu" : "Abrir menu");
+    document.body.classList.toggle("menu-open", isOpen);
   }
 
   function resetAvailabilityPeriod() {
@@ -349,7 +387,7 @@
     const { startDate, endDate } = getAvailabilityPeriod();
     return startDate === endDate
       ? `Disponibilidade em ${formatDate(startDate)}`
-      : `Disponibilidade de ${formatDate(startDate)} ate ${formatDate(endDate)}`;
+      : `Disponibilidade de ${formatDate(startDate)} até ${formatDate(endDate)}`;
   }
 
   function syncAvailabilityControls() {
@@ -397,6 +435,78 @@
     setAvailabilityPeriod(today, today);
   }
 
+  function resetFinancePeriod() {
+    state.financePeriodMode = "month";
+    state.financeMonth = todayISO().slice(0, 7);
+    state.financePreset = "30d";
+  }
+
+  function getFinancePeriod() {
+    const today = todayISO();
+    if (state.financePeriodMode === "month") {
+      const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(state.financeMonth)
+        ? state.financeMonth
+        : today.slice(0, 7);
+      const startDate = `${month}-01`;
+      return {
+        startDate,
+        endDate: addDaysToISODate(addMonthsToISODate(startDate, 1), -1),
+        label: formatFinanceMonth(month),
+      };
+    }
+
+    const preset = FINANCE_PERIOD_PRESETS[state.financePreset] || FINANCE_PERIOD_PRESETS["30d"];
+    return {
+      startDate: preset.days
+        ? addDaysToISODate(today, -(preset.days - 1))
+        : addMonthsToISODate(today, -preset.months),
+      endDate: today,
+      label: preset.label,
+    };
+  }
+
+  function syncFinancePeriodControls(period = getFinancePeriod()) {
+    const isMonthMode = state.financePeriodMode === "month";
+    $("#financeMonthPicker").value = state.financeMonth || todayISO().slice(0, 7);
+    $("#financeMonthControl").hidden = !isMonthMode;
+    $("#financePresetControl").hidden = isMonthMode;
+    $$("[data-finance-period-mode]").forEach((button) => {
+      const isActive = button.dataset.financePeriodMode === state.financePeriodMode;
+      button.classList.toggle("active", isActive);
+      button.setAttribute("aria-pressed", String(isActive));
+    });
+    $$("[data-finance-preset]").forEach((button) => {
+      const isActive = !isMonthMode && button.dataset.financePreset === state.financePreset;
+      button.classList.toggle("active", isActive);
+      button.setAttribute("aria-pressed", String(isActive));
+    });
+    $("#financeTitle").textContent = `Relatório financeiro: ${period.label}`;
+    $("#financePeriodRange").textContent = `${formatDate(period.startDate)} até ${formatDate(period.endDate)}`;
+  }
+
+  function setFinancePeriodMode(mode) {
+    state.financePeriodMode = mode === "preset" ? "preset" : "month";
+    renderFinance();
+  }
+
+  function setFinancePreset(preset) {
+    if (!FINANCE_PERIOD_PRESETS[preset]) {
+      return;
+    }
+
+    state.financePreset = preset;
+    state.financePeriodMode = "preset";
+    renderFinance();
+  }
+
+  function handleFinanceMonthChange(event) {
+    if (event.currentTarget.value) {
+      state.financeMonth = event.currentTarget.value;
+    }
+    state.financePeriodMode = "month";
+    renderFinance();
+  }
+
   function renderDashboard() {
     syncAvailabilityControls();
     const { startDate, endDate } = getAvailabilityPeriod();
@@ -410,37 +520,17 @@
     const availableUnits = state.items.reduce((sum, item) => sum + getItemAvailabilityForPeriod(item, startDate, endDate).available, 0);
 
     $("#dashboardStats").innerHTML = [
-      ["LocaÃ§Ãµes ativas", activeRentals.length],
+      ["Locações ativas", activeRentals.length],
       ["Entregar/retirar 3 dias", upcomingStarts],
       ["Buscar/devolver 3 dias", upcomingEnds],
       ["Valor a receber", formatMoney(receivable)],
-      ["Itens disponiveis no periodo", availableUnits],
+      ["Itens disponíveis no período", availableUnits],
     ]
       .map(([label, value]) => `<article class="kpi-card"><span>${label}</span><strong>${value}</strong></article>`)
       .join("");
 
     $("#todayList").innerHTML = renderUpcomingAgenda(scheduleEntries);
     $("#reservationReminders").innerHTML = renderReservationReminders(scheduleEntries);
-    $("#dashboardAlerts").innerHTML = renderAlerts();
-    $("#dashboardStatusBoards").innerHTML = renderDashboardStatusBoards();
-    $("#inventorySummary").innerHTML = state.items.length
-      ? state.items
-          .slice(0, 12)
-          .map((item) => {
-            const periodStats = getItemAvailabilityForPeriod(item, startDate, endDate);
-            return `
-              <div class="inventory-pill clickable-item" role="button" tabindex="0" data-item-id="${item.id}">
-                <div>
-                  <strong>${escapeHtml(item.name)}</strong>
-                  <span>${escapeHtml(item.category || "Sem categoria")}${item.color ? ` - ${escapeHtml(item.color)}` : ""}</span>
-                  <span>Total ${periodStats.total} - ocupado ${periodStats.occupied}</span>
-                </div>
-                <strong>${periodStats.available}</strong>
-              </div>
-            `;
-          })
-          .join("")
-      : emptyState("Cadastre os primeiros itens para ver a disponibilidade.");
   }
 
   function getScheduleEntries(days = 3) {
@@ -507,7 +597,7 @@
   function renderReservationReminders(entries) {
     const reminders = entries.slice(0, 8);
     if (!reminders.length) {
-      return emptyState("Nenhuma entrega, busca ou devoluÃ§Ã£o nos prÃ³ximos 3 dias.");
+      return emptyState("Nenhuma entrega, busca ou devolução nos próximos 3 dias.");
     }
 
     return reminders
@@ -517,7 +607,7 @@
           <div class="compact-item reminder-item ${isToday ? "today" : ""}">
             <div>
               <strong>${escapeHtml(entry.actionLabel)} - pedido ${escapeHtml(entry.rental.orderNumber)}</strong>
-              <span>${formatDate(entry.date)} Â· ${escapeHtml(entry.client?.name || "Cliente nÃ£o encontrado")}</span>
+              <span>${formatDate(entry.date)} · ${escapeHtml(entry.client?.name || "Cliente não encontrado")}</span>
               <span>${escapeHtml(entry.itemText)}</span>
             </div>
             <span>${isToday ? "Hoje" : statusLabel(entry.rental.status)}</span>
@@ -532,9 +622,9 @@
       <div class="compact-item agenda-item">
         <div>
           <strong>${escapeHtml(entry.actionLabel)} - pedido ${escapeHtml(entry.rental.orderNumber)}</strong>
-          <span>${escapeHtml(entry.client?.name || "Cliente nÃ£o encontrado")} Â· ${escapeHtml(entry.itemText)}</span>
-          <span>Entrega/retirada: ${formatDate(entry.rental.startDate)} Â· DevoluÃ§Ã£o/busca: ${formatDate(entry.rental.endDate)}</span>
-          <span>Status: ${statusLabel(entry.rental.status)} Â· Pagamento: ${PAYMENT_STATUS[entry.rental.paymentStatus] || entry.rental.paymentStatus || "-"}</span>
+          <span>${escapeHtml(entry.client?.name || "Cliente não encontrado")} · ${escapeHtml(entry.itemText)}</span>
+          <span>Entrega/retirada: ${formatDate(entry.rental.startDate)} · Devolução/busca: ${formatDate(entry.rental.endDate)}</span>
+          <span>Status: ${statusLabel(entry.rental.status)} · Pagamento: ${PAYMENT_STATUS[entry.rental.paymentStatus] || entry.rental.paymentStatus || "-"}</span>
         </div>
         <span>${formatMoney(getRentalTotals(entry.rental).total)}</span>
       </div>
@@ -546,7 +636,7 @@
       return "Entregar/retirar";
     }
 
-    return rental.status === "reserved" ? "DevoluÃ§Ã£o prevista" : "Buscar/devolver";
+    return rental.status === "reserved" ? "Devolução prevista" : "Buscar/devolver";
   }
 
   function getRentalItemSummary(rental) {
@@ -558,97 +648,6 @@
     const visible = lines.slice(0, 2).map((line) => `${line.qty}x ${line.name}`);
     const remaining = lines.length - visible.length;
     return remaining > 0 ? `${visible.join(", ")} +${remaining}` : visible.join(", ");
-  }
-
-  function renderAlerts() {
-    const { startDate, endDate } = getAvailabilityPeriod();
-    const alerts = state.items
-      .map((item) => ({ item, stats: getItemAvailabilityForPeriod(item, startDate, endDate) }))
-      .filter(({ stats }) => stats.available <= 2 || stats.unavailable > 0)
-      .slice(0, 10);
-
-    if (!alerts.length) {
-      return emptyState("Nenhum alerta de estoque no momento.");
-    }
-
-    return alerts
-      .map(({ item, stats }) => `
-        <div class="compact-item">
-          <div>
-            <strong>${escapeHtml(item.name)}</strong>
-            <span>${stats.available <= 2 ? "Disponibilidade baixa no periodo" : "Tem item indisponivel"}</span>
-          </div>
-          <span>${stats.available} disponivel</span>
-        </div>
-      `)
-      .join("");
-  }
-
-  function renderDashboardStatusBoards() {
-    return DASHBOARD_STATUS_ORDER.map((status) => {
-      const rentals = sortRentalsByDateDesc(state.rentals.filter((rental) => rental.status === status)).slice(0, 10);
-      return `
-        <section class="status-board">
-          <button class="status-board-title" type="button" data-dashboard-status="${status}">
-            <span>${statusLabel(status)}</span>
-            <small>Ver todas</small>
-          </button>
-          <div class="compact-list">
-            ${rentals.length ? rentals.map(renderDashboardStatusRental).join("") : emptyState("Nenhuma locacao neste status.")}
-          </div>
-        </section>
-      `;
-    }).join("");
-  }
-
-  function renderDashboardStatusRental(rental) {
-    const client = getClient(rental.clientId);
-    const totals = getRentalTotals(rental);
-    return `
-      <div class="compact-item status-rental-item clickable-item" role="button" tabindex="0" data-rental-id="${rental.id}">
-        <div>
-          <strong>${escapeHtml(client?.name || "Cliente nao encontrado")}</strong>
-          <span>${formatDate(rental.startDate)} ate ${formatDate(rental.endDate)}</span>
-        </div>
-        <span>${formatMoney(totals.total)}</span>
-      </div>
-    `;
-  }
-
-  function handleDashboardStatusClick(event) {
-    const statusButton = event.target.closest("[data-dashboard-status]");
-    if (statusButton) {
-      $("#rentalStatusFilter").value = statusButton.dataset.dashboardStatus;
-      $("#rentalDateFilter").value = "";
-      renderRentals();
-      showView("rentals");
-      return;
-    }
-
-    const rentalElement = event.target.closest("[data-rental-id]");
-    if (rentalElement) {
-      const rental = getRental(Number(rentalElement.dataset.rentalId));
-      if (rental) {
-        openRentalDetailsModal(rental);
-      }
-    }
-  }
-
-  function handleDashboardStatusKeydown(event) {
-    if (event.key !== "Enter" && event.key !== " ") {
-      return;
-    }
-
-    const rentalElement = event.target.closest("[data-rental-id]");
-    if (!rentalElement) {
-      return;
-    }
-
-    event.preventDefault();
-    const rental = getRental(Number(rentalElement.dataset.rentalId));
-    if (rental) {
-      openRentalDetailsModal(rental);
-    }
   }
 
   function renderStockFilters() {
@@ -696,7 +695,7 @@
         <div class="card-top">
           <div>
             <h3 class="card-title">${escapeHtml(item.name)}</h3>
-            <p class="card-subtitle">${escapeHtml(item.notes || "Sem observaÃ§Ãµes")}</p>
+            <p class="card-subtitle">${escapeHtml(item.notes || "Sem observações")}</p>
           </div>
           <div class="badge-row">
             <span class="badge">${escapeHtml(item.category || "Item")}</span>
@@ -705,17 +704,17 @@
         </div>
         <div class="metric-grid">
           <div class="metric"><span>Total</span><strong>${stats.total}</strong></div>
-          <div class="metric"><span>Disponivel no periodo</span><strong>${periodStats.available}</strong></div>
-          <div class="metric"><span>Ocupado no periodo</span><strong>${periodStats.occupied}</strong></div>
-          <div class="metric"><span>Reservado no periodo</span><strong>${periodStats.reserved}</strong></div>
+          <div class="metric"><span>Disponível no período</span><strong>${periodStats.available}</strong></div>
+          <div class="metric"><span>Ocupado no período</span><strong>${periodStats.occupied}</strong></div>
+          <div class="metric"><span>Reservado no período</span><strong>${periodStats.reserved}</strong></div>
           <div class="metric"><span>Entregue/alugado</span><strong>${periodStats.delivered}</strong></div>
           <div class="metric"><span>Reservado futuro</span><strong>${stats.futureReserved}</strong></div>
-          <div class="metric"><span>PrÃ³xima reserva</span><strong>${stats.nextReservationDate ? formatDate(stats.nextReservationDate) : "-"}</strong></div>
+          <div class="metric"><span>Próxima reserva</span><strong>${stats.nextReservationDate ? formatDate(stats.nextReservationDate) : "-"}</strong></div>
           <div class="metric"><span>Devolvido</span><strong>${stats.returned}</strong></div>
-          <div class="metric"><span>IndisponÃ­vel</span><strong>${stats.unavailable}</strong></div>
+          <div class="metric"><span>Indisponível</span><strong>${stats.unavailable}</strong></div>
         </div>
-        ${conflictText ? `<p class="muted-text"><strong>Uso no periodo:</strong><br>${conflictText}</p>` : `<p class="muted-text">Nenhuma locacao ocupando este item no periodo consultado.</p>`}
-        <p class="muted-text">Valor padrÃ£o: <strong>${formatMoney(item.defaultPrice || 0)}</strong></p>
+        ${conflictText ? `<p class="muted-text"><strong>Uso no período:</strong><br>${conflictText}</p>` : `<p class="muted-text">Nenhuma locação ocupando este item no período consultado.</p>`}
+        <p class="muted-text">Valor padrão: <strong>${formatMoney(item.defaultPrice || 0)}</strong></p>
         <div class="card-actions">
           <button type="button" data-action="edit-item" data-id="${item.id}">Editar</button>
           <button type="button" class="danger-mini" data-action="delete-item" data-id="${item.id}">Excluir</button>
@@ -726,7 +725,7 @@
 
   function renderKits() {
     syncAvailabilityControls();
-    $("#kitsList").innerHTML = state.kits.length ? state.kits.map(renderKitCard).join("") : emptyState("Cadastre conjuntos para lanÃ§ar locaÃ§Ãµes mais rÃ¡pido.");
+    $("#kitsList").innerHTML = state.kits.length ? state.kits.map(renderKitCard).join("") : emptyState("Cadastre conjuntos para lançar locações mais rápido.");
   }
 
   function renderKitCard(kit) {
@@ -749,12 +748,12 @@
         <div class="card-top">
           <div>
             <h3 class="card-title">${escapeHtml(kit.name)}</h3>
-            <p class="card-subtitle">${escapeHtml(kit.notes || "Sem observaÃ§Ãµes")}</p>
+            <p class="card-subtitle">${escapeHtml(kit.notes || "Sem observações")}</p>
           </div>
           <span class="badge">${components.length} item${components.length === 1 ? "" : "s"}</span>
         </div>
         <div class="metric-grid">
-          <div class="metric"><span>Disponivel no periodo</span><strong>${kitAvailability.available}</strong></div>
+          <div class="metric"><span>Disponível no período</span><strong>${kitAvailability.available}</strong></div>
           <div class="metric"><span>Item limitante</span><strong>${escapeHtml(kitAvailability.limitingItem || "-")}</strong></div>
         </div>
         <p class="muted-text">${componentText}</p>
@@ -795,14 +794,14 @@
             <h3 class="card-title">${escapeHtml(client.name)}</h3>
             <p class="card-subtitle">${escapeHtml(client.phone || "Sem telefone")}</p>
           </div>
-          <span class="badge">${rentals.length} locaÃ§Ã£o${rentals.length === 1 ? "" : "es"}</span>
+          <span class="badge">${rentals.length} locação${rentals.length === 1 ? "" : "es"}</span>
         </div>
         <p class="muted-text">
           ${client.document ? `Documento: ${escapeHtml(client.document)}<br>` : ""}
-          ${client.address ? `EndereÃ§o: ${escapeHtml(client.address)}<br>` : ""}
+          ${client.address ? `Endereço: ${escapeHtml(client.address)}<br>` : ""}
           ${client.notes ? `Obs.: ${escapeHtml(client.notes)}` : ""}
         </p>
-        <div class="compact-list">${history.length ? history.join("") : emptyState("Sem histÃ³rico de locaÃ§Ãµes.")}</div>
+        <div class="compact-list">${history.length ? history.join("") : emptyState("Sem histórico de locações.")}</div>
         <div class="card-actions">
           <button type="button" data-action="edit-client" data-id="${client.id}">Editar</button>
           <button type="button" class="danger-mini" data-action="delete-client" data-id="${client.id}">Excluir</button>
@@ -813,7 +812,7 @@
 
   function renderFormOptions() {
     $("#rentalItemSelect").innerHTML = state.items.length
-      ? state.items.map((item) => `<option value="${item.id}">${escapeHtml(item.name)} Â· ${formatMoney(item.defaultPrice || 0)}</option>`).join("")
+      ? state.items.map((item) => `<option value="${item.id}">${escapeHtml(item.name)} · ${formatMoney(item.defaultPrice || 0)}</option>`).join("")
       : `<option value="">Cadastre itens no estoque</option>`;
     $("#rentalKitSelect").innerHTML = state.kits.length
       ? state.kits.map((kit) => `<option value="${kit.id}">${escapeHtml(kit.name)}</option>`).join("")
@@ -827,7 +826,7 @@
     state.dailyPricingRows = [];
     $("#rentalId").value = "";
     $("#rentalClientId").value = "";
-    $("#newRentalTitle").textContent = "Nova locaÃ§Ã£o";
+    $("#newRentalTitle").textContent = "Nova locação";
     $("#rentalForm").reset();
     $("#clientMatchInfo").textContent = "";
     $("#rentalOrderDate").value = todayISO();
@@ -851,7 +850,7 @@
     const qty = Math.max(1, toNumber($("#rentalItemQty").value));
 
     if (!item) {
-      alert("Cadastre um item no estoque antes de adicionar Ã  locaÃ§Ã£o.");
+      alert("Cadastre um item no estoque antes de adicionar à locação.");
       return;
     }
 
@@ -877,12 +876,12 @@
     const qty = Math.max(1, Math.floor(toNumber($("#rentalKitQty").value)));
 
     if (!kit) {
-      alert("Cadastre um conjunto antes de adicionar Ã  locaÃ§Ã£o.");
+      alert("Cadastre um conjunto antes de adicionar à locação.");
       return;
     }
 
     if (!Array.isArray(kit.items) || !kit.items.length) {
-      alert("Este conjunto nÃ£o tem itens cadastrados.");
+      alert("Este conjunto não tem itens cadastrados.");
       return;
     }
 
@@ -918,14 +917,14 @@
     });
 
     if (missingItems.length) {
-      alert(`Alguns itens do conjunto nÃ£o existem mais no estoque:\n\n${missingItems.join("\n")}`);
+      alert(`Alguns itens do conjunto não existem mais no estoque:\n\n${missingItems.join("\n")}`);
     }
 
     $("#rentalKitQty").value = "1";
     renderRentalItemsEditor();
     const shortages = getCurrentRentalShortages();
     if (shortages.length) {
-      alert(`AtenÃ§Ã£o: o conjunto foi adicionado, mas hÃ¡ falta de estoque no perÃ­odo:\n\n${shortages.join("\n")}`);
+      alert(`Atenção: o conjunto foi adicionado, mas há falta de estoque no período:\n\n${shortages.join("\n")}`);
     }
   }
 
@@ -980,7 +979,7 @@
 
   function getRentalLineAvailabilityText(item, line, startDate, endDate) {
     if (!item) {
-      return `<span class="badge red">Item nÃ£o encontrado</span>`;
+      return `<span class="badge red">Item não encontrado</span>`;
     }
 
     if (!startDate || !endDate) {
@@ -988,13 +987,13 @@
     }
 
     if (endDate < startDate) {
-      return `<span class="badge red">Confira as datas da locaÃ§Ã£o</span>`;
+      return `<span class="badge red">Confira as datas da locação</span>`;
     }
 
     const available = getAvailableForPeriod(item, startDate, endDate, state.editingRentalId);
     const total = Number(item.totalQty) || 0;
     const isShort = available < (Number(line.qty) || 0);
-    return `<span class="badge ${isShort ? "red" : "green"}">DisponÃ­vel no perÃ­odo selecionado: ${available} de ${total}</span>`;
+    return `<span class="badge ${isShort ? "red" : "green"}">Disponível no período selecionado: ${available} de ${total}</span>`;
   }
 
   function handleRentalLineInput(event) {
@@ -1049,14 +1048,14 @@
     }
 
     if (!state.currentRentalItems.length) {
-      container.innerHTML = emptyState("Adicione itens ou conjuntos para configurar as diarias.");
+    container.innerHTML = emptyState("Adicione itens ou conjuntos para configurar as diárias.");
       return;
     }
 
     const startDate = $("#rentalStartDate").value;
     const endDate = $("#rentalEndDate").value;
     if (!startDate || !endDate || endDate < startDate) {
-      container.innerHTML = emptyState("Escolha datas validas para configurar a cobranca por dias.");
+      container.innerHTML = emptyState("Escolha datas válidas para configurar a cobrança por dias.");
       return;
     }
 
@@ -1088,7 +1087,7 @@
                     </label>
                     <div class="daily-day-foot">
                       <span>${formatMoney(dayTotal)}</span>
-                      <button type="button" data-action="copy-daily-price" data-row-index="${rowIndex}" data-day-index="${dayIndex}">Aplicar proximos</button>
+                      <button type="button" data-action="copy-daily-price" data-row-index="${rowIndex}" data-day-index="${dayIndex}">Aplicar próximos</button>
                     </div>
                   </div>
                 `;
@@ -1102,7 +1101,7 @@
     container.innerHTML = `
       <div class="daily-pricing-note">
         <strong>Subtotal das diarias: ${formatMoney(getDailyPricingSubtotal(getCurrentDailyPricingPayload()))}</strong>
-        <span>Desative dias que nao serao cobrados ou ajuste os valores manualmente.</span>
+        <span>Desative dias que não serão cobrados ou ajuste os valores manualmente.</span>
       </div>
       ${rows.join("")}
     `;
@@ -1312,13 +1311,13 @@
 
     const shortages = checkRentalAvailability(rental, rental.id || null);
     if (shortages.length) {
-      const message = `Estoque insuficiente no perÃ­odo:\n\n${shortages.join("\n")}`;
+      const message = `Estoque insuficiente no período:\n\n${shortages.join("\n")}`;
       if (rental.status === "quote") {
-        if (!confirm(`${message}\n\nDeseja salvar apenas como orÃ§amento mesmo assim?`)) {
+        if (!confirm(`${message}\n\nDeseja salvar apenas como orçamento mesmo assim?`)) {
           return;
         }
       } else {
-        alert(`${message}\n\nA reserva ou entrega nÃ£o foi salva.`);
+        alert(`${message}\n\nA reserva ou entrega não foi salva.`);
         return;
       }
     }
@@ -1335,7 +1334,7 @@
       rental.returnProblems = existing.returnProblems || [];
       rental.updatedAt = now;
       await PlanetaDB.put("rentals", rental);
-      showToast(`LocaÃ§Ã£o ${rental.orderNumber} atualizada.`);
+      showToast(`Locação ${rental.orderNumber} atualizada.`);
     } else {
       delete rental.id;
       rental.orderNumber = await PlanetaDB.nextOrderNumber();
@@ -1343,7 +1342,7 @@
       rental.updatedAt = now;
       rental.returnProblems = [];
       await PlanetaDB.add("rentals", rental);
-      showToast(`LocaÃ§Ã£o ${rental.orderNumber} salva como ${statusLabel(rental.status)}.`);
+      showToast(`Locação ${rental.orderNumber} salva como ${statusLabel(rental.status)}.`);
     }
 
     await loadAll();
@@ -1353,7 +1352,7 @@
     } catch (error) {
       console.error(error);
       const detail = error?.name || error?.message ? `\n\nDetalhe: ${[error?.name, error?.message].filter(Boolean).join(" - ")}` : "";
-      alert(`NÃ£o foi possÃ­vel salvar a locaÃ§Ã£o. Verifique os dados e tente novamente.${detail}`);
+      alert(`Não foi possível salvar a locação. Verifique os dados e tente novamente.${detail}`);
     }
   }
 
@@ -1374,16 +1373,16 @@
     }
 
     if (!isValidCpf(clientCpf)) {
-      $("#clientMatchInfo").textContent = "CPF invÃ¡lido. Confira os 11 dÃ­gitos antes de salvar a locaÃ§Ã£o.";
+      $("#clientMatchInfo").textContent = "CPF inválido. Confira os 11 dígitos antes de salvar a locação.";
       $("#rentalClientCpf").focus();
-      alert("Informe um CPF vÃ¡lido para continuar a locaÃ§Ã£o. O CPF precisa ter 11 dÃ­gitos e dÃ­gitos verificadores corretos.");
+      alert("Informe um CPF válido para continuar a locação. O CPF precisa ter 11 dígitos e dígitos verificadores corretos.");
       return null;
     }
 
     $("#rentalClientCpf").value = formatCpf(cpfDigits);
 
     if (!orderDate || !startDate || !endDate || endDate < startDate) {
-      alert("Informe as datas do pedido, retirada/entrega e devoluÃ§Ã£o corretamente.");
+      alert("Informe as datas do pedido, retirada/entrega e devolução corretamente.");
       return null;
     }
 
@@ -1414,7 +1413,7 @@
       .filter((line) => line.itemId && line.qty > 0);
 
     if (!lines.length) {
-      alert("Adicione pelo menos um item Ã  locaÃ§Ã£o.");
+      alert("Adicione pelo menos um item à locação.");
       return null;
     }
 
@@ -1479,7 +1478,7 @@
       address: rental.clientDraft.address,
     };
 
-    rental.orderNumber = existing?.orderNumber || "PrÃ©via";
+    rental.orderNumber = existing?.orderNumber || "Prévia";
     openReceiptModal(rental, client);
   }
 
@@ -1496,7 +1495,7 @@
       return (!search || text.includes(search)) && (!status || rental.status === status) && dateMatches;
     }));
 
-    $("#rentalsList").innerHTML = rentals.length ? rentals.map(renderRentalSummaryCard).join("") : emptyState("Nenhuma locaÃ§Ã£o encontrada.");
+    $("#rentalsList").innerHTML = rentals.length ? rentals.map(renderRentalSummaryCard).join("") : emptyState("Nenhuma locação encontrada.");
   }
 
   function renderRentalSummaryCard(rental) {
@@ -1505,8 +1504,8 @@
     return `
       <article class="rental-summary-card clickable-item" role="button" tabindex="0" data-rental-id="${rental.id}">
         <div>
-          <h3>${escapeHtml(client?.name || "Cliente nao encontrado")}</h3>
-          <p>${formatDate(rental.startDate)} ate ${formatDate(rental.endDate)}</p>
+          <h3>${escapeHtml(client?.name || "Cliente não encontrado")}</h3>
+          <p>${formatDate(rental.startDate)} até ${formatDate(rental.endDate)}</p>
           <span class="badge ${statusClass}">Status: ${statusLabel(rental.status)}</span>
         </div>
       </article>
@@ -1520,7 +1519,7 @@
     const items = rental.items
       .map((line) => {
         const originQty = line.originKitQty ? `${escapeHtml(line.originKitQty)}x ` : "";
-        const origin = line.originType === "kit" ? ` Â· origem: ${originQty}${escapeHtml(line.originName || "Conjunto")}` : "";
+        const origin = line.originType === "kit" ? ` · origem: ${originQty}${escapeHtml(line.originName || "Conjunto")}` : "";
         return `${escapeHtml(line.qty)}x ${escapeHtml(line.name)} (${formatMoney(line.unitPrice)})${origin}`;
       })
       .join("<br>");
@@ -1536,7 +1535,7 @@
         <div class="card-top">
           <div>
             <h3 class="card-title">Pedido ${escapeHtml(rental.orderNumber)}</h3>
-            <p class="card-subtitle">${escapeHtml(client?.name || "Cliente nÃ£o encontrado")} Â· ${formatDate(rental.startDate)} a ${formatDate(rental.endDate)}</p>
+            <p class="card-subtitle">${escapeHtml(client?.name || "Cliente não encontrado")} · ${formatDate(rental.startDate)} a ${formatDate(rental.endDate)}</p>
           </div>
           <div class="badge-row">
             <span class="badge ${statusClass}">${statusLabel(rental.status)}</span>
@@ -1553,7 +1552,7 @@
         ${kitSummary.length ? `<p class="muted-text"><strong>Conjuntos:</strong><br>${kitSummary.map((line) => `${escapeHtml(line.qty)}x ${escapeHtml(line.name)}`).join("<br>")}</p>` : ""}
         <p class="muted-text">${items}</p>
         ${rental.eventLocation ? `<p class="muted-text">Local: ${escapeHtml(rental.eventLocation)}</p>` : ""}
-        ${returnProblems ? `<p class="muted-text"><strong>Itens com problema na devoluÃ§Ã£o:</strong><br>${returnProblems}</p>` : ""}
+        ${returnProblems ? `<p class="muted-text"><strong>Itens com problema na devolução:</strong><br>${returnProblems}</p>` : ""}
         <div class="card-actions">
           <button type="button" data-action="receipt-rental" data-id="${rental.id}">Gerar contrato</button>
           <button type="button" data-action="edit-rental" data-id="${rental.id}">Editar</button>
@@ -1589,7 +1588,7 @@
         <div class="card-top">
           <div>
             <h3 class="card-title">Pedido ${escapeHtml(rental.orderNumber || "-")}</h3>
-            <p class="card-subtitle">${escapeHtml(client?.name || "Cliente nao encontrado")} - ${formatDate(rental.startDate)} ate ${formatDate(rental.endDate)}</p>
+            <p class="card-subtitle">${escapeHtml(client?.name || "Cliente não encontrado")} - ${formatDate(rental.startDate)} até ${formatDate(rental.endDate)}</p>
           </div>
           <div class="badge-row">
             <span class="badge ${statusClass}">${statusLabel(rental.status)}</span>
@@ -1633,7 +1632,7 @@
         ${kitSummary.length ? `<p class="muted-text"><strong>Conjuntos:</strong><br>${kitSummary.map((line) => `${escapeHtml(line.qty)}x ${escapeHtml(line.name)}`).join("<br>")}</p>` : ""}
         <p class="muted-text"><strong>Itens alugados:</strong><br>${items || "Sem itens"}</p>
         ${rental.notes ? `<p class="muted-text"><strong>Observacoes:</strong><br>${escapeHtml(rental.notes)}</p>` : ""}
-        ${returnProblems ? `<p class="muted-text"><strong>Itens com problema na devolucao:</strong><br>${returnProblems}</p>` : ""}
+        ${returnProblems ? `<p class="muted-text"><strong>Itens com problema na devolução:</strong><br>${returnProblems}</p>` : ""}
 
         <div class="card-actions rental-detail-actions">
           <button type="button" data-action="receipt-rental" data-id="${rental.id}">Gerar contrato</button>
@@ -1648,7 +1647,7 @@
   }
 
   function openRentalDetailsModal(rental) {
-    openModal("Detalhes da locacao", renderRentalDetailsContent(rental));
+    openModal("Detalhes da locação", renderRentalDetailsContent(rental));
     $(".rental-detail-actions", $("#modalRoot")).addEventListener("click", async (event) => {
       const button = event.target.closest("button[data-action]");
       if (!button) {
@@ -1697,15 +1696,15 @@
     if (button.dataset.action === "delete-item") {
       const activeUse = state.rentals.some((rental) => ACTIVE_STATUSES.includes(rental.status) && rental.items.some((line) => Number(line.itemId) === id));
       if (activeUse) {
-        alert("Este item estÃ¡ em locaÃ§Ã£o ativa. Finalize ou cancele os pedidos antes de excluir.");
+        alert("Este item está em locação ativa. Finalize ou cancele os pedidos antes de excluir.");
         return;
       }
 
-      if (confirm(`Excluir o item "${item.name}"? Esta aÃ§Ã£o nÃ£o pode ser desfeita.`)) {
+      if (confirm(`Excluir o item "${item.name}"? Esta ação não pode ser desfeita.`)) {
         await PlanetaDB.remove("items", id);
         await loadAll();
         refreshAll();
-        showToast("Item excluÃ­do.");
+        showToast("Item excluído.");
       }
     }
   }
@@ -1763,11 +1762,11 @@
       return;
     }
 
-    if (button.dataset.action === "delete-kit" && confirm(`Excluir o conjunto "${kit.name}"? As locaÃ§Ãµes jÃ¡ salvas nÃ£o serÃ£o alteradas.`)) {
+    if (button.dataset.action === "delete-kit" && confirm(`Excluir o conjunto "${kit.name}"? As locações já salvas não serão alteradas.`)) {
       await PlanetaDB.remove("kits", Number(kit.id));
       await loadAll();
       refreshAll();
-      showToast("Conjunto excluÃ­do.");
+      showToast("Conjunto excluído.");
     }
   }
 
@@ -1806,7 +1805,7 @@
           <div id="kitItemsEditor" class="line-list"></div>
         </section>
         <label class="wide">
-          ObservaÃ§Ãµes
+          Observações
           <textarea name="notes" rows="3">${escapeHtml(kit?.notes || "")}</textarea>
         </label>
         <div class="form-actions wide">
@@ -1946,7 +1945,7 @@
     if (button.dataset.action === "delete-client") {
       const hasRentals = state.rentals.some((rental) => Number(rental.clientId) === id);
       if (hasRentals) {
-        alert("Este cliente tem histÃ³rico de locaÃ§Ãµes. Edite o cadastro em vez de excluir.");
+        alert("Este cliente tem histórico de locações. Edite o cadastro em vez de excluir.");
         return;
       }
 
@@ -1954,7 +1953,7 @@
         await PlanetaDB.remove("clients", id);
         await loadAll();
         refreshAll();
-        showToast("Cliente excluÃ­do.");
+        showToast("Cliente excluído.");
       }
     }
   }
@@ -2055,14 +2054,14 @@
 
   async function markDelivered(rental) {
     if (rental.status === "returned" || rental.status === "cancelled") {
-      alert("Este pedido jÃ¡ foi encerrado.");
+      alert("Este pedido já foi encerrado.");
       return;
     }
 
     const candidate = { ...rental, status: "delivered" };
     const shortages = checkRentalAvailability(candidate, rental.id);
     if (shortages.length) {
-      alert(`NÃ£o dÃ¡ para marcar como entregue por falta de estoque:\n\n${shortages.join("\n")}`);
+      alert(`Não dá para marcar como entregue por falta de estoque:\n\n${shortages.join("\n")}`);
       return;
     }
 
@@ -2080,19 +2079,19 @@
 
   function openReturnModal(rental) {
     if (rental.status === "returned") {
-      alert("Este pedido jÃ¡ foi marcado como devolvido.");
+      alert("Este pedido já foi marcado como devolvido.");
       return;
     }
 
     if (rental.status !== "delivered") {
-      alert("Marque o pedido como entregue/alugado antes de registrar a devoluÃ§Ã£o.");
+      alert("Marque o pedido como entregue/alugado antes de registrar a devolução.");
       return;
     }
 
     const rows = rental.items
       .map((line, index) => `
         <div class="return-row">
-          <strong>${escapeHtml(line.name)} Â· ${line.qty} alugado(s)</strong>
+          <strong>${escapeHtml(line.name)} · ${line.qty} alugado(s)</strong>
           <div class="form-grid">
             <label>
               Qtde com problema
@@ -2104,7 +2103,7 @@
                 <option value="Danificado">Danificado</option>
                 <option value="Quebrado">Quebrado</option>
                 <option value="Perdido">Perdido</option>
-                <option value="IndisponÃ­vel">IndisponÃ­vel</option>
+                <option value="Indisponível">Indisponível</option>
               </select>
             </label>
           </div>
@@ -2112,17 +2111,17 @@
       `)
       .join("");
 
-    openModal("Registrar devoluÃ§Ã£o", `
+    openModal("Registrar devolução", `
       <form id="returnForm">
-        <p class="muted-text">Informe somente os itens que voltaram quebrados, perdidos ou indisponÃ­veis. O restante volta automaticamente para o estoque disponÃ­vel.</p>
+        <p class="muted-text">Informe somente os itens que voltaram quebrados, perdidos ou indisponíveis. O restante volta automaticamente para o estoque disponível.</p>
         ${rows}
         <label class="wide">
-          ObservaÃ§Ã£o da devoluÃ§Ã£o
+          Observação da devolução
           <textarea id="returnNotes" rows="3" placeholder="Ex.: 1 forro manchado, 2 cadeiras quebradas"></textarea>
         </label>
         <div class="form-actions">
           <button class="secondary-action" type="button" data-close-modal="true">Cancelar</button>
-          <button class="primary-action red" type="submit">Confirmar devoluÃ§Ã£o</button>
+          <button class="primary-action red" type="submit">Confirmar devolução</button>
         </div>
       </form>
     `);
@@ -2174,7 +2173,7 @@
     closeModal();
     await loadAll();
     refreshAll();
-    showToast("DevoluÃ§Ã£o registrada.");
+    showToast("Devolução registrada.");
   }
 
   async function cancelRental(rental) {
@@ -2199,7 +2198,7 @@
       await PlanetaDB.remove("rentals", Number(rental.id));
       await loadAll();
       refreshAll();
-      showToast("Pedido excluÃ­do.");
+      showToast("Pedido excluído.");
     }
   }
 
@@ -2231,15 +2230,15 @@
           <input name="totalQty" type="number" min="0" inputmode="numeric" required value="${item?.totalQty ?? 0}">
         </label>
         <label>
-          IndisponÃ­vel
+          Indisponível
           <input name="unavailableQty" type="number" min="0" inputmode="numeric" value="${item?.unavailableQty ?? 0}">
         </label>
         <label>
-          Valor padrÃ£o
+          Valor padrão
           <input name="defaultPrice" type="number" min="0" step="0.01" inputmode="decimal" value="${item?.defaultPrice ?? 0}">
         </label>
         <label class="wide">
-          ObservaÃ§Ãµes
+          Observações
           <textarea name="notes" rows="3">${escapeHtml(item?.notes || "")}</textarea>
         </label>
         <div class="form-actions wide">
@@ -2304,7 +2303,7 @@
             return `
               <div class="compact-item item-history-row">
                 <div>
-                  <strong>Pedido ${escapeHtml(rental.orderNumber || "-")} - ${escapeHtml(client?.name || "Cliente nao encontrado")}</strong>
+                  <strong>Pedido ${escapeHtml(rental.orderNumber || "-")} - ${escapeHtml(client?.name || "Cliente não encontrado")}</strong>
                   <span>${formatDate(rental.startDate)} a ${formatDate(rental.endDate)} - ${escapeHtml(qty)} unidade(s)</span>
                   <span>Status: ${statusLabel(rental.status)} - Pagamento: ${PAYMENT_STATUS[rental.paymentStatus] || rental.paymentStatus || "-"}</span>
                 </div>
@@ -2313,7 +2312,7 @@
             `;
           })
           .join("")
-      : emptyState("Nenhuma locacao encontrada para este item.");
+      : emptyState("Nenhuma locação encontrada para este item.");
 
     openModal(`Detalhes do item`, `
       <div class="item-detail-modal">
@@ -2338,16 +2337,16 @@
           <p class="muted-text">${escapeHtml(getAvailabilityPeriodLabel())}</p>
           <div class="metric-grid">
             <div class="metric"><span>Total cadastrado</span><strong>${stats.total}</strong></div>
-            <div class="metric"><span>Disponivel no periodo</span><strong>${periodStats.available}</strong></div>
-            <div class="metric"><span>Ocupado no periodo</span><strong>${periodStats.occupied}</strong></div>
-            <div class="metric"><span>Reservado no periodo</span><strong>${periodStats.reserved}</strong></div>
+            <div class="metric"><span>Disponível no período</span><strong>${periodStats.available}</strong></div>
+            <div class="metric"><span>Ocupado no período</span><strong>${periodStats.occupied}</strong></div>
+            <div class="metric"><span>Reservado no período</span><strong>${periodStats.reserved}</strong></div>
             <div class="metric"><span>Entregue/alugado</span><strong>${periodStats.delivered}</strong></div>
             <div class="metric"><span>Reservado em datas futuras</span><strong>${stats.futureReserved}</strong></div>
-            <div class="metric"><span>Proxima reserva</span><strong>${stats.nextReservationDate ? formatDate(stats.nextReservationDate) : "-"}</strong></div>
+            <div class="metric"><span>Próxima reserva</span><strong>${stats.nextReservationDate ? formatDate(stats.nextReservationDate) : "-"}</strong></div>
             <div class="metric"><span>Indisponivel</span><strong>${stats.unavailable}</strong></div>
             <div class="metric"><span>Devolvido</span><strong>${stats.returned}</strong></div>
           </div>
-          ${conflictText ? `<p class="muted-text"><strong>Uso no periodo:</strong><br>${conflictText}</p>` : `<p class="muted-text">Nenhuma locacao ocupando este item no periodo consultado.</p>`}
+          ${conflictText ? `<p class="muted-text"><strong>Uso no período:</strong><br>${conflictText}</p>` : `<p class="muted-text">Nenhuma locação ocupando este item no período consultado.</p>`}
         </section>
 
         <section class="item-tab-panel hidden" data-item-tab-panel="rentals">
@@ -2463,11 +2462,11 @@
           <input name="document" type="text" value="${escapeAttr(client?.document || "")}">
         </label>
         <label class="wide">
-          EndereÃ§o
+          Endereço
           <input name="address" type="text" value="${escapeAttr(client?.address || "")}">
         </label>
         <label class="wide">
-          ObservaÃ§Ãµes
+          Observações
           <textarea name="notes" rows="3">${escapeHtml(client?.notes || "")}</textarea>
         </label>
         <div class="form-actions wide">
@@ -2538,8 +2537,8 @@
         <header class="receipt-header">
           <div class="brand-mark" aria-hidden="true">PL</div>
           <div>
-            <h2>Contrato de aluguel - Planeta LocaÃ§Ãµes</h2>
-            <p class="muted-text">Eventos do seu jeito Â· AnÃ¡polis-GO Â· Pix: gv8407940@gmail.com</p>
+            <h2>Contrato de aluguel - Planeta Locações</h2>
+            <p class="muted-text">Eventos do seu jeito · Anápolis-GO · Pix: gv8407940@gmail.com</p>
             <p class="muted-text">Titular do Pix: Gabriel Victor Souza Silva</p>
           </div>
         </header>
@@ -2551,13 +2550,13 @@
             <strong>Status:</strong> ${statusLabel(rental.status)}
           </div>
           <div>
-            <strong>Cliente:</strong> ${escapeHtml(client?.name || "Cliente nÃ£o encontrado")}<br>
+            <strong>Cliente:</strong> ${escapeHtml(client?.name || "Cliente não encontrado")}<br>
             <strong>Telefone:</strong> ${escapeHtml(client?.phone || "-")}<br>
             <strong>Documento:</strong> ${escapeHtml(client?.document || "-")}<br>
-            <strong>EndereÃ§o:</strong> ${escapeHtml(client?.address || "-")}
+            <strong>Endereço:</strong> ${escapeHtml(client?.address || "-")}
           </div>
           <div>
-            <strong>PerÃ­odo:</strong> ${formatDate(rental.startDate)} a ${formatDate(rental.endDate)}<br>
+            <strong>Período:</strong> ${formatDate(rental.startDate)} a ${formatDate(rental.endDate)}<br>
             <strong>Local:</strong> ${escapeHtml(rental.eventLocation || "-")}
           </div>
           <div>
@@ -2571,7 +2570,7 @@
             <tr>
               <th>Item</th>
               <th>Qtde</th>
-              <th>UnitÃ¡rio</th>
+              <th>Unitário</th>
               <th>Total</th>
             </tr>
           </thead>
@@ -2587,20 +2586,20 @@
           <div class="totals-row"><span>Restante</span><strong>${formatMoney(totals.remaining)}</strong></div>
         </div>
 
-        ${rental.notes ? `<p><strong>ObservaÃ§Ãµes:</strong> ${escapeHtml(rental.notes)}</p>` : ""}
-        ${returnProblems ? `<p><strong>Itens com problema na devoluÃ§Ã£o:</strong></p><ul>${returnProblems}</ul>` : ""}
-        ${rental.returnNotes ? `<p><strong>ObservaÃ§Ã£o da devoluÃ§Ã£o:</strong> ${escapeHtml(rental.returnNotes)}</p>` : ""}
+        ${rental.notes ? `<p><strong>Observações:</strong> ${escapeHtml(rental.notes)}</p>` : ""}
+        ${returnProblems ? `<p><strong>Itens com problema na devolução:</strong></p><ul>${returnProblems}</ul>` : ""}
+        ${rental.returnNotes ? `<p><strong>Observação da devolução:</strong> ${escapeHtml(rental.returnNotes)}</p>` : ""}
 
         <div class="terms-box">
-          <strong>CondiÃ§Ãµes do aluguel:</strong>
-          O locatÃ¡rio declara receber os itens listados acima para uso no perÃ­odo informado e se responsabiliza pela devoluÃ§Ã£o nas mesmas condiÃ§Ãµes de entrega.
-          Danos, perdas, quebras, manchas ou extravios poderÃ£o ser cobrados conforme avaliaÃ§Ã£o do locador.
+          <strong>Condições do aluguel:</strong>
+          O locatário declara receber os itens listados acima para uso no período informado e se responsabiliza pela devolução nas mesmas condições de entrega.
+          Danos, perdas, quebras, manchas ou extravios poderão ser cobrados conforme avaliação do locador.
           O valor total, sinal e restante seguem o combinado neste contrato.
         </div>
 
         <div class="signature-row">
           <div class="signature-line">Locador</div>
-          <div class="signature-line">LocatÃ¡rio</div>
+          <div class="signature-line">Locatário</div>
         </div>
       </div>
 
@@ -2622,7 +2621,7 @@
 
       openModal("Contrato de aluguel", `
         <div class="contract-preview-wrap">
-          <iframe id="contractPreviewFrame" class="contract-frame" title="PrÃ©via do contrato de aluguel"></iframe>
+          <iframe id="contractPreviewFrame" class="contract-frame" title="Prévia do contrato de aluguel"></iframe>
         </div>
         <div class="form-actions no-print">
           <button class="secondary-action" type="button" data-close-modal="true">Fechar</button>
@@ -2637,7 +2636,7 @@
       $("#shareReceiptBtn").addEventListener("click", () => shareReceipt(rental, client));
     } catch (error) {
       console.error(error);
-      alert("NÃ£o foi possÃ­vel gerar o contrato. Verifique se o template oficial estÃ¡ no projeto.");
+      alert("Não foi possível gerar o contrato. Verifique se o template oficial está no projeto.");
     }
   }
 
@@ -2648,7 +2647,7 @@
 
     const response = await fetch(CONTRACT_TEMPLATE_URL);
     if (!response.ok) {
-      throw new Error("Template oficial do contrato nÃ£o encontrado.");
+      throw new Error("Template oficial do contrato não encontrado.");
     }
 
     state.contractTemplate = await response.text();
@@ -2714,7 +2713,7 @@
       String(rental.eventLocation || "").length;
 
     return {
-      numero_contrato: escapeHtml(rental.orderNumber || "PrÃ©via"),
+      numero_contrato: escapeHtml(rental.orderNumber || "Prévia"),
       data_emissao: formatDate(todayISO()),
       nome_cliente: escapeHtml(client?.name || ""),
       telefone_cliente: escapeHtml(client?.phone || ""),
@@ -2787,7 +2786,7 @@
 
   function printContractFrame(frame) {
     if (!frame?.contentWindow) {
-      alert("A prÃ©via do contrato ainda nÃ£o carregou. Tente novamente em alguns segundos.");
+      alert("A prévia do contrato ainda não carregou. Tente novamente em alguns segundos.");
       return;
     }
 
@@ -2798,10 +2797,10 @@
   async function shareReceipt(rental, client) {
     const totals = getRentalTotals(rental);
     const text = [
-      "Contrato de aluguel - Planeta LocaÃ§Ãµes",
+      "Contrato de aluguel - Planeta Locações",
       `Pedido ${rental.orderNumber}`,
       `Cliente: ${client?.name || "-"}`,
-      `PerÃ­odo: ${formatDate(rental.startDate)} a ${formatDate(rental.endDate)}`,
+      `Período: ${formatDate(rental.startDate)} a ${formatDate(rental.endDate)}`,
       `Subtotal dos itens: ${formatMoney(totals.subtotal)}`,
       `Frete: ${formatMoney(totals.freight)}`,
       `Total: ${formatMoney(totals.total)}`,
@@ -2812,7 +2811,7 @@
 
     if (navigator.share) {
       await navigator.share({
-        title: `Contrato ${rental.orderNumber} - Planeta LocaÃ§Ãµes`,
+        title: `Contrato ${rental.orderNumber} - Planeta Locações`,
         text,
       });
       return;
@@ -2887,7 +2886,7 @@
         <div class="card-top">
           <div>
             <h3 class="card-title">${escapeHtml(expense.description || "Gasto")}</h3>
-            <p class="card-subtitle">${formatDate(getExpenseDate(expense))} Â· ${escapeHtml(expense.category || "Sem categoria")}</p>
+            <p class="card-subtitle">${formatDate(getExpenseDate(expense))} · ${escapeHtml(expense.category || "Sem categoria")}</p>
           </div>
           <div class="badge-row">
             <span class="badge ${normalizeExpenseType(expense) === "investment" ? "" : "yellow"}">${expenseTypeLabel(normalizeExpenseType(expense))}</span>
@@ -2913,15 +2912,17 @@
 
   function renderFinanceFilters() {
     const categories = uniqueValues([
-      "LocaÃ§Ãµes",
+      "Locações",
       ...state.expenses.map((expense) => expense.category || "Sem categoria"),
     ]);
     fillSelect($("#financeCategoryFilter"), categories, "Todas");
   }
 
   function renderFinance() {
+    const period = getFinancePeriod();
+    syncFinancePeriodControls(period);
     const allMovements = getFinanceMovements();
-    const movements = allMovements.filter(isMovementInFinanceFilters);
+    const movements = allMovements.filter((movement) => isMovementInFinanceFilters(movement, period));
     const incomeTotal = movements
       .filter((movement) => movement.type === "income")
       .reduce((sum, movement) => sum + movement.amount, 0);
@@ -2949,7 +2950,7 @@
 
     $("#financeStats").innerHTML = [
       ["Total de entradas", formatMoney(incomeTotal)],
-      ["LocaÃ§Ãµes a receber", formatMoney(receivableTotal)],
+      ["Locações a receber", formatMoney(receivableTotal)],
       ["Total de gastos", formatMoney(investmentTotal + costTotal)],
       ["Total de investimentos", formatMoney(investmentTotal)],
       ["Total de custos", formatMoney(costTotal)],
@@ -2962,11 +2963,11 @@
       .map(([label, value]) => `<article class="kpi-card"><span>${label}</span><strong>${value}</strong></article>`)
       .join("");
 
-    $("#upcomingFinanceList").innerHTML = renderUpcomingExpenses();
-    $("#overdueFinanceList").innerHTML = renderOverdueExpenses();
+    $("#upcomingFinanceList").innerHTML = renderUpcomingExpenses(period);
+    $("#overdueFinanceList").innerHTML = renderOverdueExpenses(period);
     $("#financeList").innerHTML = movements.length
       ? movements.map(renderFinanceMovementCard).join("")
-      : emptyState("Nenhuma movimentaÃ§Ã£o encontrada para os filtros escolhidos.");
+      : emptyState("Nenhuma movimentação encontrada para os filtros escolhidos.");
     renderFinanceCharts(movements, {
       incomeTotal,
       investmentTotal,
@@ -3085,7 +3086,7 @@
           <div class="legend-item">
             <span class="legend-swatch" style="background:${row.color}"></span>
             <strong>${escapeHtml(row.label)}</strong>
-            <span>${formatMoney(row.value)} Â· ${percent}%</span>
+            <span>${formatMoney(row.value)} · ${percent}%</span>
           </div>
         `;
       })
@@ -3102,10 +3103,10 @@
         const receivableAmount = getRentalReceivableAmount(rental);
         const baseMovement = {
           source: "rental",
-          category: "LocaÃ§Ãµes",
+          category: "Locações",
           date: rental.startDate || rental.orderDate,
           title: `Pedido ${rental.orderNumber}`,
-          clientName: client?.name || "Cliente nÃ£o encontrado",
+          clientName: client?.name || "Cliente não encontrado",
           itemText: (Array.isArray(rental.items) ? rental.items : []).map((line) => `${line.qty}x ${line.name}`).join(", "),
           startDate: rental.startDate,
           endDate: rental.endDate,
@@ -3145,7 +3146,7 @@
       expenseType: normalizeExpenseType(expense),
       date: getExpenseDate(expense),
       amount: toNumber(expense.amount),
-      title: expense.description || "Gasto sem descriÃ§Ã£o",
+      title: expense.description || "Gasto sem descrição",
       paymentMethod: expense.paymentMethod || "-",
       status: expenseEffectiveStatus(expense),
       notes: expense.notes || "",
@@ -3177,23 +3178,22 @@
     return Math.max(0, roundMoney(totals.total - getRentalReceivedAmount(rental)));
   }
 
-  function isMovementInFinanceFilters(movement) {
-    const start = $("#financeStartFilter").value;
-    const end = $("#financeEndFilter").value;
-    const month = $("#financeMonthFilter").value;
-    const year = $("#financeYearFilter").value;
+  function isMovementInFinanceFilters(movement, period = getFinancePeriod()) {
     const type = $("#financeTypeFilter").value;
     const category = $("#financeCategoryFilter").value;
     const date = movement.date || "";
 
     return (
-      (!start || date >= start) &&
-      (!end || date <= end) &&
-      (!month || date.slice(5, 7) === month) &&
-      (!year || date.slice(0, 4) === String(year)) &&
+      Boolean(date) &&
+      date >= period.startDate &&
+      date <= period.endDate &&
       (!type || movement.type === type) &&
       (!category || movement.category === category)
     );
+  }
+
+  function isDateInFinancePeriod(date, period = getFinancePeriod()) {
+    return Boolean(date) && date >= period.startDate && date <= period.endDate;
   }
 
   function renderFinanceMovementCard(movement) {
@@ -3204,7 +3204,7 @@
           <div class="card-top">
             <div>
               <h3 class="card-title">${isReceived ? "Entrada" : "A receber"} - ${escapeHtml(movement.title)}</h3>
-              <p class="card-subtitle">${escapeHtml(movement.clientName)} Â· ${formatDate(movement.startDate)} a ${formatDate(movement.endDate)}</p>
+              <p class="card-subtitle">${escapeHtml(movement.clientName)} · ${formatDate(movement.startDate)} a ${formatDate(movement.endDate)}</p>
             </div>
             <div class="badge-row">
               <span class="badge ${isReceived ? "green" : "yellow"}">${FINANCE_TYPE[movement.type]}</span>
@@ -3213,7 +3213,7 @@
           </div>
           <div class="metric-grid">
             <div class="metric"><span>${isReceived ? "Valor recebido" : "Valor a receber"}</span><strong>${formatMoney(movement.amount)}</strong></div>
-            <div class="metric"><span>Total da locaÃ§Ã£o</span><strong>${formatMoney(movement.rentalTotal)}</strong></div>
+            <div class="metric"><span>Total da locação</span><strong>${formatMoney(movement.rentalTotal)}</strong></div>
             <div class="metric"><span>Pagamento</span><strong>${escapeHtml(movement.paymentMethod)}</strong></div>
             <div class="metric"><span>Data</span><strong>${formatDate(movement.date)}</strong></div>
             <div class="metric"><span>Categoria</span><strong>${escapeHtml(movement.category)}</strong></div>
@@ -3229,7 +3229,7 @@
         <div class="card-top">
           <div>
             <h3 class="card-title">${escapeHtml(movement.title)}</h3>
-            <p class="card-subtitle">${escapeHtml(movement.category)} Â· ${formatDate(movement.date)}</p>
+            <p class="card-subtitle">${escapeHtml(movement.category)} · ${formatDate(movement.date)}</p>
           </div>
           <div class="badge-row">
             <span class="badge ${movement.expenseType === "investment" ? "" : "yellow"}">${expenseTypeLabel(movement.expenseType)}</span>
@@ -3254,15 +3254,15 @@
     `;
   }
 
-  function renderUpcomingExpenses() {
-    const today = todayISO();
+  function renderUpcomingExpenses(period = getFinancePeriod()) {
     const upcoming = state.expenses
-      .filter((expense) => expenseEffectiveStatus(expense) === "pending" && getExpenseDate(expense) >= today)
+      .filter((expense) => expenseEffectiveStatus(expense) === "pending")
+      .filter((expense) => isDateInFinancePeriod(getExpenseDate(expense), period))
       .sort((a, b) => String(getExpenseDate(a)).localeCompare(String(getExpenseDate(b))))
       .slice(0, 6);
 
     if (!upcoming.length) {
-      return emptyState("Nenhum vencimento futuro cadastrado.");
+      return emptyState("Nenhum vencimento pendente neste período.");
     }
 
     return upcoming
@@ -3270,7 +3270,7 @@
         <div class="compact-item">
           <div>
             <strong>${escapeHtml(expense.description || "Gasto")}</strong>
-            <span>${formatDate(getExpenseDate(expense))} Â· ${escapeHtml(expense.category || "Sem categoria")}</span>
+            <span>${formatDate(getExpenseDate(expense))} · ${escapeHtml(expense.category || "Sem categoria")}</span>
           </div>
           <span>${formatMoney(expense.amount)}</span>
         </div>
@@ -3278,14 +3278,15 @@
       .join("");
   }
 
-  function renderOverdueExpenses() {
+  function renderOverdueExpenses(period = getFinancePeriod()) {
     const overdue = state.expenses
       .filter((expense) => expenseEffectiveStatus(expense) === "overdue")
+      .filter((expense) => isDateInFinancePeriod(getExpenseDate(expense), period))
       .sort((a, b) => String(getExpenseDate(a)).localeCompare(String(getExpenseDate(b))))
       .slice(0, 6);
 
     if (!overdue.length) {
-      return emptyState("Nenhum gasto atrasado no momento.");
+      return emptyState("Nenhum gasto atrasado neste período.");
     }
 
     return overdue
@@ -3341,7 +3342,7 @@
     openModal(title, `
       <form id="expenseForm" class="form-grid">
         <label class="wide">
-          DescriÃ§Ã£o do gasto
+          Descrição do gasto
           <input name="description" type="text" required value="${escapeAttr(expense?.description || "")}">
         </label>
         <label>
@@ -3353,10 +3354,10 @@
         </label>
         <label>
           Categoria
-          <input name="category" type="text" list="expenseCategoryOptions" value="${escapeAttr(expense?.category || "")}" placeholder="Ex.: ManutenÃ§Ã£o">
+          <input name="category" type="text" list="expenseCategoryOptions" value="${escapeAttr(expense?.category || "")}" placeholder="Ex.: Manutenção">
           <datalist id="expenseCategoryOptions">
             <option value="Compra de equipamentos"></option>
-            <option value="ManutenÃ§Ã£o"></option>
+            <option value="Manutenção"></option>
             <option value="Transporte"></option>
             <option value="Limpeza"></option>
             <option value="Taxas"></option>
@@ -3374,7 +3375,7 @@
         <label>
           Forma de pagamento
           <select name="paymentMethod">
-            ${["Pix", "Dinheiro", "CartÃ£o", "Boleto", "Outro"].map((method) => `<option ${method === (expense?.paymentMethod || "Pix") ? "selected" : ""}>${method}</option>`).join("")}
+            ${["Pix", "Dinheiro", "Cartão", "Boleto", "Outro"].map((method) => `<option ${method === (expense?.paymentMethod || "Pix") ? "selected" : ""}>${method}</option>`).join("")}
           </select>
         </label>
         <label>
@@ -3387,7 +3388,7 @@
         </label>
         ${isInstallment ? `<p class="muted-text wide">Parcela ${expense.installmentNumber || "-"} de ${expense.installmentTotal || "-"}</p>` : ""}
         <label class="wide">
-          ObservaÃ§Ãµes
+          Observações
           <textarea name="notes" rows="3">${escapeHtml(expense?.notes || "")}</textarea>
         </label>
         <div class="form-actions wide">
@@ -3437,7 +3438,7 @@
       }
 
       if (!payload.description || !payload.amount || !form.date.value) {
-        alert("Informe descriÃ§Ã£o, valor e data do gasto.");
+        alert("Informe descrição, valor e data do gasto.");
         return;
       }
 
@@ -3467,7 +3468,7 @@
     openModal("Cadastrar gasto parcelado", `
       <form id="installmentForm" class="form-grid">
         <label class="wide">
-          DescriÃ§Ã£o
+          Descrição
           <input name="description" type="text" required placeholder="Ex.: Compra de mesas e cadeiras" value="${escapeAttr(draft.description || "")}">
         </label>
         <label>
@@ -3498,7 +3499,7 @@
           <input name="amount" type="number" min="0" step="0.01" inputmode="decimal" readonly>
         </label>
         <label>
-          Vencimento das prÃ³ximas parcelas
+          Vencimento das próximas parcelas
           <select name="frequency">
             <option value="monthly">Mensal, no mesmo dia</option>
           </select>
@@ -3506,7 +3507,7 @@
         <label>
           Forma de pagamento
           <select name="paymentMethod">
-            ${["Pix", "Dinheiro", "CartÃ£o", "Boleto", "Outro"].map((method) => `<option ${method === (draft.paymentMethod || "Pix") ? "selected" : ""}>${method}</option>`).join("")}
+            ${["Pix", "Dinheiro", "Cartão", "Boleto", "Outro"].map((method) => `<option ${method === (draft.paymentMethod || "Pix") ? "selected" : ""}>${method}</option>`).join("")}
           </select>
         </label>
         <label>
@@ -3517,7 +3518,7 @@
           </select>
         </label>
         <label class="wide">
-          ObservaÃ§Ãµes
+          Observações
           <textarea name="notes" rows="3">${escapeHtml(draft.notes || "")}</textarea>
         </label>
         <div class="form-actions wide">
@@ -3544,7 +3545,7 @@
       const baseAmount = roundMoney(totalAmountValue / total);
 
       if (!form.description.value.trim() || !totalAmountValue || !form.dueDate.value) {
-        alert("Confira descriÃ§Ã£o, valor total, quantidade e primeiro vencimento das parcelas.");
+        alert("Confira descrição, valor total, quantidade e primeiro vencimento das parcelas.");
         return;
       }
 
@@ -3600,7 +3601,7 @@
       await PlanetaDB.remove("expenses", Number(expense.id));
       await loadAll();
       refreshAll();
-      showToast("Gasto excluÃ­do.");
+      showToast("Gasto excluído.");
     }
   }
 
@@ -3634,7 +3635,7 @@
         const data = JSON.parse(reader.result);
         const summary = summarizeBackupData(data);
         const choice = prompt(
-          `Backup compatÃ­vel encontrado.\n\n${summary}\n\nDigite MESCLAR para acrescentar sem apagar os dados atuais.\nDigite SUBSTITUIR para apagar os dados atuais e usar somente o backup.`
+          `Backup compatível encontrado.\n\n${summary}\n\nDigite MESCLAR para acrescentar sem apagar os dados atuais.\nDigite SUBSTITUIR para apagar os dados atuais e usar somente o backup.`
         );
         const mode = String(choice || "").trim().toUpperCase();
 
@@ -3643,7 +3644,7 @@
         }
 
         if (mode !== "MESCLAR" && mode !== "SUBSTITUIR") {
-          alert("ImportaÃ§Ã£o cancelada. Use MESCLAR ou SUBSTITUIR.");
+          alert("Importação cancelada. Use MESCLAR ou SUBSTITUIR.");
           return;
         }
 
@@ -3660,7 +3661,7 @@
         showToast(mode === "MESCLAR" ? "Backup mesclado." : "Backup importado.");
       } catch (error) {
         console.error(error);
-        alert("NÃ£o foi possÃ­vel importar o arquivo. Verifique se Ã© um backup JSON vÃ¡lido.");
+        alert("Não foi possível importar o arquivo. Verifique se é um backup JSON válido.");
       } finally {
         event.target.value = "";
       }
@@ -3670,13 +3671,13 @@
 
   function summarizeBackupData(data) {
     if (!data || typeof data !== "object" || !data.stores || typeof data.stores !== "object") {
-      throw new Error("Arquivo de backup invÃ¡lido.");
+      throw new Error("Arquivo de backup inválido.");
     }
 
     const requiredStores = ["items", "clients", "rentals", "expenses"];
     const invalidStore = requiredStores.find((store) => data.stores[store] && !Array.isArray(data.stores[store]));
     if (invalidStore) {
-      throw new Error(`Backup incompatÃ­vel: ${invalidStore}.`);
+      throw new Error(`Backup incompatível: ${invalidStore}.`);
     }
 
     const counts = {
@@ -3691,7 +3692,7 @@
       `Itens/produtos: ${counts.items}`,
       `Conjuntos/kits: ${counts.kits}`,
       `Clientes: ${counts.clients}`,
-      `LocaÃ§Ãµes: ${counts.rentals}`,
+      `Locações: ${counts.rentals}`,
       `Gastos/parcelas: ${counts.expenses}`,
     ].join("\n");
   }
@@ -3704,8 +3705,8 @@
 
     const activeRentals = state.rentals.filter((rental) => ACTIVE_STATUSES.includes(rental.status)).length;
     const warning = activeRentals
-      ? `Existem ${activeRentals} locaÃ§Ã£o(Ãµes) ativa(s). Os pedidos continuam salvos, mas o estoque serÃ¡ apagado deste aparelho.`
-      : "Clientes, locaÃ§Ãµes e gastos nÃ£o serÃ£o apagados.";
+      ? `Existem ${activeRentals} locação(ões) ativa(s). Os pedidos continuam salvos, mas o estoque será apagado deste aparelho.`
+      : "Clientes, locações e gastos não serão apagados.";
     const answer = prompt(`${warning}\n\nDigite ESTOQUE para limpar apenas os itens cadastrados no estoque.`);
 
     if (answer !== "ESTOQUE") {
@@ -3740,7 +3741,7 @@
 
   async function renderBackup() {
     const lastBackup = await PlanetaDB.getMeta("lastBackupAt", null);
-    $("#lastBackupInfo").textContent = lastBackup ? `Ãšltimo backup: ${formatDateTime(lastBackup)}` : "Nenhum backup exportado neste aparelho.";
+    $("#lastBackupInfo").textContent = lastBackup ? `Último backup: ${formatDateTime(lastBackup)}` : "Nenhum backup exportado neste aparelho.";
   }
 
   function getItemStats(item) {
@@ -3814,7 +3815,7 @@
       .slice(0, 4)
       .map(({ rental, qty }) => {
         const client = getClient(rental.clientId);
-        return `${escapeHtml(qty)} ${escapeHtml(item?.name || "item")} - pedido ${escapeHtml(rental.orderNumber || "-")} - ${escapeHtml(client?.name || "cliente")} - ${formatDate(rental.startDate)} ate ${formatDate(rental.endDate)}`;
+        return `${escapeHtml(qty)} ${escapeHtml(item?.name || "item")} - pedido ${escapeHtml(rental.orderNumber || "-")} - ${escapeHtml(client?.name || "cliente")} - ${formatDate(rental.startDate)} até ${formatDate(rental.endDate)}`;
       })
       .join("<br>");
   }
@@ -3929,7 +3930,7 @@
     requestedByItem.forEach((qty, itemId) => {
       const item = getItem(itemId);
       if (!item) {
-        shortages.push(`Item ${itemId} nÃ£o encontrado.`);
+        shortages.push(`Item ${itemId} não encontrado.`);
         return;
       }
 
@@ -3937,7 +3938,7 @@
       if (qty > available) {
         const conflicts = formatPeriodConflictSummary(item, rental.startDate, rental.endDate, ignoreRentalId);
         shortages.push(
-          `${item.name}: pedido ${qty}, disponÃ­vel ${available} de ${Number(item.totalQty) || 0} no perÃ­odo.${conflicts ? ` JÃ¡ existem ${conflicts}.` : ""}`
+          `${item.name}: pedido ${qty}, disponível ${available} de ${Number(item.totalQty) || 0} no período.${conflicts ? ` Já existem ${conflicts}.` : ""}`
         );
       }
     });
@@ -3968,7 +3969,7 @@
       if (qty > available) {
         const conflicts = formatPeriodConflictSummary(item, startDate, endDate, state.editingRentalId);
         shortages.push(
-          `${item.name}: pedido ${qty}, disponÃ­vel ${available} de ${Number(item.totalQty) || 0} no perÃ­odo.${conflicts ? ` JÃ¡ existem ${conflicts}.` : ""}`
+          `${item.name}: pedido ${qty}, disponível ${available} de ${Number(item.totalQty) || 0} no período.${conflicts ? ` Já existem ${conflicts}.` : ""}`
         );
       }
     });
@@ -4002,12 +4003,13 @@
   }
 
   function openModal(title, content) {
+    closeAppMenu();
     $("#modalRoot").innerHTML = `
       <div class="modal-backdrop" data-close-modal="true">
         <section class="modal-card" role="dialog" aria-modal="true" aria-label="${escapeAttr(title)}">
           <div class="modal-head">
             <h2>${escapeHtml(title)}</h2>
-            <button class="close-btn" type="button" data-close-modal="true" aria-label="Fechar">Ã—</button>
+            <button class="close-btn" type="button" data-close-modal="true" aria-label="Fechar">×</button>
           </div>
           <div class="modal-body">${content}</div>
         </section>
@@ -4101,7 +4103,7 @@
       phone: clientDraft.phone,
       document: clientDraft.document,
       address: clientDraft.address,
-      notes: "Criado automaticamente pela locaÃ§Ã£o.",
+      notes: "Criado automaticamente pela locação.",
       createdAt: now,
       updatedAt: now,
     };
@@ -4122,7 +4124,7 @@
     }
 
     if (!isValidCpf(cpfDigits)) {
-      info.textContent = "CPF invÃ¡lido. Confira os 11 dÃ­gitos antes de salvar a locaÃ§Ã£o.";
+      info.textContent = "CPF inválido. Confira os 11 dígitos antes de salvar a locação.";
       return;
     }
 
@@ -4130,7 +4132,7 @@
     const client = findClientByCpfDigits(cpfDigits);
 
     if (!client) {
-      info.textContent = "CPF vÃ¡lido. Um novo cliente serÃ¡ criado ao salvar a locaÃ§Ã£o.";
+      info.textContent = "CPF válido. Um novo cliente será criado ao salvar a locação.";
       return;
     }
 
@@ -4242,10 +4244,10 @@
     }
 
     if (value === addDaysToISODate(today, 1)) {
-      return "AmanhÃ£";
+      return "Amanhã";
     }
 
-    return "Depois de amanhÃ£";
+    return "Depois de amanhã";
   }
 
   function formatDate(value) {
@@ -4255,6 +4257,18 @@
 
     const [year, month, day] = value.split("-");
     return `${day}/${month}/${year}`;
+  }
+
+  function formatFinanceMonth(value) {
+    const [year, month] = String(value || "").split("-").map(Number);
+    if (!year || !month) {
+      return "mês selecionado";
+    }
+
+    return new Intl.DateTimeFormat("pt-BR", {
+      month: "long",
+      year: "numeric",
+    }).format(new Date(year, month - 1, 1));
   }
 
   function formatDateTime(value) {

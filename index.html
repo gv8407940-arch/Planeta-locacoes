@@ -10,17 +10,22 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="format-detection" content="telephone=no">
   <title>Planeta Locações</title>
-  <link rel="manifest" href="manifest.json?v=23">
+  <link rel="manifest" href="manifest.json?v=28">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
-  <link rel="stylesheet" href="style.css?v=23">
+  <link rel="stylesheet" href="style.css?v=28">
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
+      <button id="menuToggle" class="menu-toggle" type="button" aria-label="Abrir menu" aria-controls="appMenu" aria-expanded="false">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
       <div class="brand-mark" aria-hidden="true">PL</div>
       <div class="brand-copy">
         <p>Planeta Móveis</p>
@@ -30,17 +35,24 @@
       <button id="installBtn" class="ghost-action" type="button" hidden>Instalar</button>
     </header>
 
-    <nav class="app-nav" aria-label="Telas do sistema">
-      <button class="nav-btn active" type="button" data-view="dashboard">Início</button>
-      <button class="nav-btn" type="button" data-view="stock">Estoque</button>
-      <button class="nav-btn" type="button" data-view="kits">Conjuntos</button>
-      <button class="nav-btn" type="button" data-view="clients">Clientes</button>
-      <button class="nav-btn" type="button" data-view="new-rental">Nova locação</button>
-      <button class="nav-btn" type="button" data-view="rentals">Locações</button>
-      <button class="nav-btn" type="button" data-view="expenses">Gastos</button>
-      <button class="nav-btn" type="button" data-view="finance">Relatório Financeiro</button>
-      <button class="nav-btn" type="button" data-view="backup">Backup</button>
-    </nav>
+    <div id="menuOverlay" class="menu-overlay" aria-hidden="true"></div>
+    <aside id="appMenu" class="app-menu" aria-label="Navegação principal" aria-hidden="true">
+      <div class="app-menu-head">
+        <strong>Menu</strong>
+        <button id="menuClose" class="close-btn" type="button" aria-label="Fechar menu">x</button>
+      </div>
+      <nav class="app-nav" aria-label="Telas do sistema">
+        <button class="nav-btn active" type="button" data-view="dashboard">Início</button>
+        <button class="nav-btn" type="button" data-view="stock">Estoque</button>
+        <button class="nav-btn" type="button" data-view="kits">Conjuntos</button>
+        <button class="nav-btn" type="button" data-view="clients">Clientes</button>
+        <button class="nav-btn" type="button" data-view="new-rental">Nova locação</button>
+        <button class="nav-btn" type="button" data-view="rentals">Locações</button>
+        <button class="nav-btn" type="button" data-view="expenses">Gastos</button>
+        <button class="nav-btn" type="button" data-view="finance">Relatório Financeiro</button>
+        <button class="nav-btn" type="button" data-view="backup">Backup</button>
+      </nav>
+    </aside>
 
     <main>
       <section id="view-dashboard" class="view active" aria-labelledby="dashboardTitle">
@@ -68,43 +80,7 @@
             </div>
             <div id="reservationReminders" class="compact-list"></div>
           </section>
-
-          <section class="panel">
-            <div class="panel-head">
-              <h3>Alertas de estoque</h3>
-            </div>
-            <div id="dashboardAlerts" class="compact-list"></div>
-          </section>
         </div>
-
-        <section class="panel">
-          <div class="panel-head">
-            <h3>Locacoes por status</h3>
-          </div>
-          <div id="dashboardStatusBoards" class="status-board-grid"></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <h3>Disponibilidade por item</h3>
-          </div>
-          <div class="availability-query" data-availability-control>
-            <label>
-              Ver disponibilidade de
-              <input type="date" data-availability-start>
-            </label>
-            <label>
-              Ate
-              <input type="date" data-availability-end>
-            </label>
-            <div class="availability-actions">
-              <button class="secondary-action" type="button" data-action="apply-availability">Consultar</button>
-              <button class="ghost-action" type="button" data-action="availability-today">Hoje</button>
-            </div>
-          </div>
-          <p class="muted-text availability-label" data-availability-label></p>
-          <div id="inventorySummary" class="inventory-strip"></div>
-        </section>
       </section>
 
       <section id="view-stock" class="view" aria-labelledby="stockTitle">
@@ -150,7 +126,7 @@
               <input type="date" data-availability-start>
             </label>
             <label>
-              Ate
+              Até
               <input type="date" data-availability-end>
             </label>
             <div class="availability-actions">
@@ -456,8 +432,31 @@
           <div>
             <p class="section-kicker">Entradas, gastos e parcelas</p>
             <h2 id="financeTitle">Relatório Financeiro</h2>
+            <p id="financePeriodRange" class="muted-text finance-period-range"></p>
           </div>
         </div>
+
+        <section class="panel finance-period-panel" aria-label="Período do relatório financeiro">
+          <div class="panel-head">
+            <h3>Período do relatório</h3>
+          </div>
+          <div class="finance-period-modes" role="group" aria-label="Forma de escolher o período">
+            <button class="finance-period-mode active" type="button" data-finance-period-mode="month" aria-pressed="true">Mês específico</button>
+            <button class="finance-period-mode" type="button" data-finance-period-mode="preset" aria-pressed="false">Período pronto</button>
+          </div>
+          <div class="finance-period-controls">
+            <label id="financeMonthControl">
+              Mês e ano
+              <input id="financeMonthPicker" type="month">
+            </label>
+            <div id="financePresetControl" class="finance-preset-grid" hidden>
+              <button class="finance-preset-btn" type="button" data-finance-preset="30d">Último mês</button>
+              <button class="finance-preset-btn" type="button" data-finance-preset="3m">Últimos 3 meses</button>
+              <button class="finance-preset-btn" type="button" data-finance-preset="6m">Últimos 6 meses</button>
+              <button class="finance-preset-btn" type="button" data-finance-preset="12m">Últimos 12 meses</button>
+            </div>
+          </div>
+        </section>
 
         <div id="financeStats" class="kpi-grid"></div>
 
@@ -495,37 +494,7 @@
           </section>
         </div>
 
-        <div class="toolbar">
-          <label>
-            Início
-            <input id="financeStartFilter" type="date">
-          </label>
-          <label>
-            Fim
-            <input id="financeEndFilter" type="date">
-          </label>
-          <label>
-            Mês
-            <select id="financeMonthFilter">
-              <option value="">Todos</option>
-              <option value="01">Janeiro</option>
-              <option value="02">Fevereiro</option>
-              <option value="03">Março</option>
-              <option value="04">Abril</option>
-              <option value="05">Maio</option>
-              <option value="06">Junho</option>
-              <option value="07">Julho</option>
-              <option value="08">Agosto</option>
-              <option value="09">Setembro</option>
-              <option value="10">Outubro</option>
-              <option value="11">Novembro</option>
-              <option value="12">Dezembro</option>
-            </select>
-          </label>
-          <label>
-            Ano
-            <input id="financeYearFilter" type="number" min="2000" max="2100" inputmode="numeric" placeholder="Todos">
-          </label>
+        <div class="toolbar finance-detail-filters">
           <label>
             Tipo
             <select id="financeTypeFilter">
@@ -546,14 +515,14 @@
         <div class="split-layout">
           <section class="panel">
             <div class="panel-head">
-              <h3>Próximos vencimentos</h3>
+              <h3>Vencimentos pendentes no período</h3>
             </div>
             <div id="upcomingFinanceList" class="compact-list"></div>
           </section>
 
           <section class="panel danger-panel">
             <div class="panel-head">
-              <h3>Gastos atrasados</h3>
+              <h3>Gastos atrasados no período</h3>
             </div>
             <div id="overdueFinanceList" class="compact-list"></div>
           </section>
@@ -623,7 +592,7 @@
   <div id="modalRoot"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="db.js?v=23"></script>
-  <script src="app.js?v=23"></script>
+  <script src="db.js?v=28"></script>
+  <script src="app.js?v=28"></script>
 </body>
 </html>

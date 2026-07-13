@@ -12,7 +12,7 @@ if errorlevel 1 (
 echo Iniciando o sistema Planeta Locacoes...
 echo.
 echo Se o navegador nao abrir sozinho, acesse:
-echo http://127.0.0.1:8765/index.html?v=23
+echo http://127.0.0.1:8765/index.html?v=28
 echo.
 echo Este servidor local e apenas para testes no computador.
 echo Para usar no iPhone sem depender do computador, publique a pasta em uma hospedagem HTTPS gratuita.
