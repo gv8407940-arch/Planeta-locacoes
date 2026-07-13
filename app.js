@@ -31,7 +31,13 @@
     "pending-expense": "Gasto pendente",
     "future-expense": "Gasto futuro",
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=26";
+  const FINANCE_PERIOD_PRESETS = {
+    "30d": { label: "último mês", days: 30 },
+    "3m": { label: "últimos 3 meses", months: 3 },
+    "6m": { label: "últimos 6 meses", months: 6 },
+    "12m": { label: "últimos 12 meses", months: 12 },
+  };
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=28";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -61,6 +67,9 @@
     dailyPricingRows: [],
     availabilityStartDate: "",
     availabilityEndDate: "",
+    financePeriodMode: "month",
+    financeMonth: "",
+    financePreset: "30d",
   };
 
   const moneyFormatter = new Intl.NumberFormat("pt-BR", {
@@ -81,6 +90,7 @@
       await migrateFinanceData();
       await loadPreferences();
       resetAvailabilityPeriod();
+      resetFinancePeriod();
       bindEvents();
       await loadAll();
       startNewRental();
@@ -141,10 +151,13 @@
     $("#expenseTypeFilter").addEventListener("change", renderExpenses);
     $("#expenseStatusFilter").addEventListener("change", renderExpenses);
     $("#expenseCategoryFilter").addEventListener("change", renderExpenses);
-    $("#financeStartFilter").addEventListener("change", renderFinance);
-    $("#financeEndFilter").addEventListener("change", renderFinance);
-    $("#financeMonthFilter").addEventListener("change", renderFinance);
-    $("#financeYearFilter").addEventListener("input", renderFinance);
+    $$("[data-finance-period-mode]").forEach((button) => {
+      button.addEventListener("click", () => setFinancePeriodMode(button.dataset.financePeriodMode));
+    });
+    $$("[data-finance-preset]").forEach((button) => {
+      button.addEventListener("click", () => setFinancePreset(button.dataset.financePreset));
+    });
+    $("#financeMonthPicker").addEventListener("change", handleFinanceMonthChange);
     $("#financeTypeFilter").addEventListener("change", renderFinance);
     $("#financeCategoryFilter").addEventListener("change", renderFinance);
 
@@ -420,6 +433,78 @@
   function handleAvailabilityToday() {
     const today = todayISO();
     setAvailabilityPeriod(today, today);
+  }
+
+  function resetFinancePeriod() {
+    state.financePeriodMode = "month";
+    state.financeMonth = todayISO().slice(0, 7);
+    state.financePreset = "30d";
+  }
+
+  function getFinancePeriod() {
+    const today = todayISO();
+    if (state.financePeriodMode === "month") {
+      const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(state.financeMonth)
+        ? state.financeMonth
+        : today.slice(0, 7);
+      const startDate = `${month}-01`;
+      return {
+        startDate,
+        endDate: addDaysToISODate(addMonthsToISODate(startDate, 1), -1),
+        label: formatFinanceMonth(month),
+      };
+    }
+
+    const preset = FINANCE_PERIOD_PRESETS[state.financePreset] || FINANCE_PERIOD_PRESETS["30d"];
+    return {
+      startDate: preset.days
+        ? addDaysToISODate(today, -(preset.days - 1))
+        : addMonthsToISODate(today, -preset.months),
+      endDate: today,
+      label: preset.label,
+    };
+  }
+
+  function syncFinancePeriodControls(period = getFinancePeriod()) {
+    const isMonthMode = state.financePeriodMode === "month";
+    $("#financeMonthPicker").value = state.financeMonth || todayISO().slice(0, 7);
+    $("#financeMonthControl").hidden = !isMonthMode;
+    $("#financePresetControl").hidden = isMonthMode;
+    $$("[data-finance-period-mode]").forEach((button) => {
+      const isActive = button.dataset.financePeriodMode === state.financePeriodMode;
+      button.classList.toggle("active", isActive);
+      button.setAttribute("aria-pressed", String(isActive));
+    });
+    $$("[data-finance-preset]").forEach((button) => {
+      const isActive = !isMonthMode && button.dataset.financePreset === state.financePreset;
+      button.classList.toggle("active", isActive);
+      button.setAttribute("aria-pressed", String(isActive));
+    });
+    $("#financeTitle").textContent = `Relatório financeiro: ${period.label}`;
+    $("#financePeriodRange").textContent = `${formatDate(period.startDate)} até ${formatDate(period.endDate)}`;
+  }
+
+  function setFinancePeriodMode(mode) {
+    state.financePeriodMode = mode === "preset" ? "preset" : "month";
+    renderFinance();
+  }
+
+  function setFinancePreset(preset) {
+    if (!FINANCE_PERIOD_PRESETS[preset]) {
+      return;
+    }
+
+    state.financePreset = preset;
+    state.financePeriodMode = "preset";
+    renderFinance();
+  }
+
+  function handleFinanceMonthChange(event) {
+    if (event.currentTarget.value) {
+      state.financeMonth = event.currentTarget.value;
+    }
+    state.financePeriodMode = "month";
+    renderFinance();
   }
 
   function renderDashboard() {
@@ -2834,8 +2919,10 @@
   }
 
   function renderFinance() {
+    const period = getFinancePeriod();
+    syncFinancePeriodControls(period);
     const allMovements = getFinanceMovements();
-    const movements = allMovements.filter(isMovementInFinanceFilters);
+    const movements = allMovements.filter((movement) => isMovementInFinanceFilters(movement, period));
     const incomeTotal = movements
       .filter((movement) => movement.type === "income")
       .reduce((sum, movement) => sum + movement.amount, 0);
@@ -2876,8 +2963,8 @@
       .map(([label, value]) => `<article class="kpi-card"><span>${label}</span><strong>${value}</strong></article>`)
       .join("");
 
-    $("#upcomingFinanceList").innerHTML = renderUpcomingExpenses();
-    $("#overdueFinanceList").innerHTML = renderOverdueExpenses();
+    $("#upcomingFinanceList").innerHTML = renderUpcomingExpenses(period);
+    $("#overdueFinanceList").innerHTML = renderOverdueExpenses(period);
     $("#financeList").innerHTML = movements.length
       ? movements.map(renderFinanceMovementCard).join("")
       : emptyState("Nenhuma movimentação encontrada para os filtros escolhidos.");
@@ -3091,23 +3178,22 @@
     return Math.max(0, roundMoney(totals.total - getRentalReceivedAmount(rental)));
   }
 
-  function isMovementInFinanceFilters(movement) {
-    const start = $("#financeStartFilter").value;
-    const end = $("#financeEndFilter").value;
-    const month = $("#financeMonthFilter").value;
-    const year = $("#financeYearFilter").value;
+  function isMovementInFinanceFilters(movement, period = getFinancePeriod()) {
     const type = $("#financeTypeFilter").value;
     const category = $("#financeCategoryFilter").value;
     const date = movement.date || "";
 
     return (
-      (!start || date >= start) &&
-      (!end || date <= end) &&
-      (!month || date.slice(5, 7) === month) &&
-      (!year || date.slice(0, 4) === String(year)) &&
+      Boolean(date) &&
+      date >= period.startDate &&
+      date <= period.endDate &&
       (!type || movement.type === type) &&
       (!category || movement.category === category)
     );
+  }
+
+  function isDateInFinancePeriod(date, period = getFinancePeriod()) {
+    return Boolean(date) && date >= period.startDate && date <= period.endDate;
   }
 
   function renderFinanceMovementCard(movement) {
@@ -3168,15 +3254,15 @@
     `;
   }
 
-  function renderUpcomingExpenses() {
-    const today = todayISO();
+  function renderUpcomingExpenses(period = getFinancePeriod()) {
     const upcoming = state.expenses
-      .filter((expense) => expenseEffectiveStatus(expense) === "pending" && getExpenseDate(expense) >= today)
+      .filter((expense) => expenseEffectiveStatus(expense) === "pending")
+      .filter((expense) => isDateInFinancePeriod(getExpenseDate(expense), period))
       .sort((a, b) => String(getExpenseDate(a)).localeCompare(String(getExpenseDate(b))))
       .slice(0, 6);
 
     if (!upcoming.length) {
-      return emptyState("Nenhum vencimento futuro cadastrado.");
+      return emptyState("Nenhum vencimento pendente neste período.");
     }
 
     return upcoming
@@ -3192,14 +3278,15 @@
       .join("");
   }
 
-  function renderOverdueExpenses() {
+  function renderOverdueExpenses(period = getFinancePeriod()) {
     const overdue = state.expenses
       .filter((expense) => expenseEffectiveStatus(expense) === "overdue")
+      .filter((expense) => isDateInFinancePeriod(getExpenseDate(expense), period))
       .sort((a, b) => String(getExpenseDate(a)).localeCompare(String(getExpenseDate(b))))
       .slice(0, 6);
 
     if (!overdue.length) {
-      return emptyState("Nenhum gasto atrasado no momento.");
+      return emptyState("Nenhum gasto atrasado neste período.");
     }
 
     return overdue
@@ -4170,6 +4257,18 @@
 
     const [year, month, day] = value.split("-");
     return `${day}/${month}/${year}`;
+  }
+
+  function formatFinanceMonth(value) {
+    const [year, month] = String(value || "").split("-").map(Number);
+    if (!year || !month) {
+      return "mês selecionado";
+    }
+
+    return new Intl.DateTimeFormat("pt-BR", {
+      month: "long",
+      year: "numeric",
+    }).format(new Date(year, month - 1, 1));
   }
 
   function formatDateTime(value) {
