@@ -2,6 +2,10 @@
 
 Sistema PWA para controle de locações, estoque, clientes, contratos e financeiro da Planeta Locações.
 
+## Acesse o sistema
+
+[Abra o Planeta Locações](https://gv8407940-arch.github.io/Planeta-locacoes/)
+
 ## Sobre o projeto
 
 O Planeta Locações foi desenvolvido para resolver uma necessidade real de controle de aluguel de mesas, cadeiras, forros e itens para eventos.
