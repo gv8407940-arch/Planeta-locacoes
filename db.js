@@ -2,8 +2,8 @@
   "use strict";
 
   const DB_NAME = "planeta-locacoes";
-  const DB_VERSION = 4;
-  const STORES = ["items", "clients", "rentals", "expenses", "kits", "meta"];
+  const DB_VERSION = 5;
+  const STORES = ["items", "clients", "rentals", "expenses", "kits", "itemOccurrences", "meta"];
 
   function open() {
     return new Promise((resolve, reject) => {
@@ -63,6 +63,17 @@
             autoIncrement: true,
           });
           store.createIndex("name", "name", { unique: false });
+        }
+
+        if (!db.objectStoreNames.contains("itemOccurrences")) {
+          const store = db.createObjectStore("itemOccurrences", {
+            keyPath: "id",
+            autoIncrement: true,
+          });
+          store.createIndex("itemId", "itemId", { unique: false });
+          store.createIndex("rentalId", "rentalId", { unique: false });
+          store.createIndex("status", "status", { unique: false });
+          store.createIndex("occurredAt", "occurredAt", { unique: false });
         }
 
         if (!db.objectStoreNames.contains("meta")) {
@@ -219,7 +230,8 @@
     const clientIdMap = await mergeClients(data.stores.clients || []);
     const itemIdMap = await mergeItems(data.stores.items || []);
     await mergeKits(data.stores.kits || [], itemIdMap);
-    await mergeRentals(data.stores.rentals || [], clientIdMap, itemIdMap);
+    const rentalIdMap = await mergeRentals(data.stores.rentals || [], clientIdMap, itemIdMap);
+    await mergeItemOccurrences(data.stores.itemOccurrences || [], itemIdMap, clientIdMap, rentalIdMap);
     await mergeExpenses(data.stores.expenses || []);
     await setMeta("lastMergedBackupAt", new Date().toISOString());
   }
@@ -268,6 +280,7 @@
 
   async function mergeRentals(records, clientIdMap, itemIdMap) {
     const existing = await getAll("rentals");
+    const idMap = new Map();
 
     for (const record of Array.isArray(records) ? records : []) {
       const payload = {
@@ -282,14 +295,18 @@
       };
       delete payload.id;
 
-      const duplicate = existing.some((rental) => rentalKey(rental) === rentalKey(payload));
+      const duplicate = existing.find((rental) => rentalKey(rental) === rentalKey(payload));
       if (duplicate) {
+        idMap.set(record.id, duplicate.id);
         continue;
       }
 
       const id = await add("rentals", payload);
+      idMap.set(record.id, id);
       existing.push({ ...payload, id });
     }
+
+    return idMap;
   }
 
   async function mergeKits(records, itemIdMap) {
@@ -333,6 +350,27 @@
     }
   }
 
+  async function mergeItemOccurrences(records, itemIdMap, clientIdMap, rentalIdMap) {
+    const existing = await getAll("itemOccurrences");
+
+    for (const record of Array.isArray(records) ? records : []) {
+      const payload = {
+        ...record,
+        itemId: itemIdMap.get(record.itemId) || record.itemId,
+        clientId: clientIdMap.get(record.clientId) || record.clientId,
+        rentalId: rentalIdMap.get(record.rentalId) || record.rentalId,
+      };
+      delete payload.id;
+
+      if (existing.some((occurrence) => occurrenceKey(occurrence) === occurrenceKey(payload))) {
+        continue;
+      }
+
+      const id = await add("itemOccurrences", payload);
+      existing.push({ ...payload, id });
+    }
+  }
+
   function clientKey(client) {
     const document = onlyDigits(client?.document);
     if (document) {
@@ -362,6 +400,54 @@
 
   function expenseKey(expense) {
     return `${normalizeKey(expense?.description)}|${expense?.date || expense?.dueDate || ""}|${Number(expense?.amount) || 0}|${expense?.seriesId || ""}|${expense?.installmentNumber || ""}`;
+  }
+
+  function occurrenceKey(occurrence) {
+    return [
+      occurrence?.type || "",
+      occurrence?.status || "",
+      occurrence?.itemId || "",
+      occurrence?.rentalId || "",
+      occurrence?.occurredAt || "",
+      Number(occurrence?.qty) || 0,
+      normalizeKey(occurrence?.notes),
+    ].join("|");
+  }
+
+  async function completeRentalReturn(rental, updatedItems, occurrences) {
+    const db = await open();
+    try {
+      const tx = db.transaction(["rentals", "items", "itemOccurrences"], "readwrite");
+      const done = transactionDone(tx);
+      const rentalsStore = tx.objectStore("rentals");
+      const itemsStore = tx.objectStore("items");
+      const occurrencesStore = tx.objectStore("itemOccurrences");
+
+      for (const item of updatedItems) {
+        itemsStore.put(item);
+      }
+      rentalsStore.put(rental);
+      for (const occurrence of occurrences) {
+        occurrencesStore.add(occurrence);
+      }
+
+      await done;
+    } finally {
+      db.close();
+    }
+  }
+
+  async function updateItemWithOccurrence(item, occurrence) {
+    const db = await open();
+    try {
+      const tx = db.transaction(["items", "itemOccurrences"], "readwrite");
+      const done = transactionDone(tx);
+      tx.objectStore("items").put(item);
+      tx.objectStore("itemOccurrences").add(occurrence);
+      await done;
+    } finally {
+      db.close();
+    }
   }
 
   function onlyDigits(value) {
@@ -577,5 +663,7 @@
     importData,
     clearAll,
     seedIfEmpty,
+    completeRentalReturn,
+    updateItemWithOccurrence,
   };
 })();

@@ -37,7 +37,7 @@
     "6m": { label: "últimos 6 meses", months: 6 },
     "12m": { label: "últimos 12 meses", months: 12 },
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=28";
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=30";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -58,6 +58,7 @@
     rentals: [],
     expenses: [],
     kits: [],
+    itemOccurrences: [],
     currentRentalItems: [],
     editingRentalId: null,
     deferredInstallPrompt: null,
@@ -212,12 +213,13 @@
   }
 
   async function loadAll() {
-    const [items, clients, rentals, expenses, kits] = await Promise.all([
+    const [items, clients, rentals, expenses, kits, itemOccurrences] = await Promise.all([
       PlanetaDB.getAll("items"),
       PlanetaDB.getAll("clients"),
       PlanetaDB.getAll("rentals"),
       PlanetaDB.getAll("expenses"),
       PlanetaDB.getAll("kits"),
+      PlanetaDB.getAll("itemOccurrences"),
     ]);
 
     state.items = items.sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
@@ -225,6 +227,7 @@
     state.rentals = rentals.sort((a, b) => Number(b.orderNumber) - Number(a.orderNumber));
     state.expenses = expenses.map(normalizeStoredExpense).sort((a, b) => String(getExpenseDate(b)).localeCompare(String(getExpenseDate(a))));
     state.kits = kits.sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
+    state.itemOccurrences = itemOccurrences.sort((a, b) => String(b.occurredAt || "").localeCompare(String(a.occurredAt || "")));
   }
 
   async function loadPreferences() {
@@ -705,13 +708,13 @@
         <div class="metric-grid">
           <div class="metric"><span>Total</span><strong>${stats.total}</strong></div>
           <div class="metric"><span>Disponível no período</span><strong>${periodStats.available}</strong></div>
-          <div class="metric"><span>Ocupado no período</span><strong>${periodStats.occupied}</strong></div>
+          <div class="metric"><span>Alugado</span><strong>${stats.rentedActive}</strong></div>
+          <div class="metric"><span>Em manutenção</span><strong>${stats.maintenance}</strong></div>
+          <div class="metric"><span>Quebrado/perdido</span><strong>${stats.brokenLost}</strong></div>
           <div class="metric"><span>Reservado no período</span><strong>${periodStats.reserved}</strong></div>
-          <div class="metric"><span>Entregue/alugado</span><strong>${periodStats.delivered}</strong></div>
           <div class="metric"><span>Reservado futuro</span><strong>${stats.futureReserved}</strong></div>
           <div class="metric"><span>Próxima reserva</span><strong>${stats.nextReservationDate ? formatDate(stats.nextReservationDate) : "-"}</strong></div>
-          <div class="metric"><span>Devolvido</span><strong>${stats.returned}</strong></div>
-          <div class="metric"><span>Indisponível</span><strong>${stats.unavailable}</strong></div>
+          ${stats.unavailable ? `<div class="metric"><span>Indisponível manual</span><strong>${stats.unavailable}</strong></div>` : ""}
         </div>
         ${conflictText ? `<p class="muted-text"><strong>Uso no período:</strong><br>${conflictText}</p>` : `<p class="muted-text">Nenhuma locação ocupando este item no período consultado.</p>`}
         <p class="muted-text">Valor padrão: <strong>${formatMoney(item.defaultPrice || 0)}</strong></p>
@@ -2090,34 +2093,45 @@
 
     const rows = rental.items
       .map((line, index) => `
-        <div class="return-row">
-          <strong>${escapeHtml(line.name)} · ${line.qty} alugado(s)</strong>
-          <div class="form-grid">
+        <section class="return-row" data-return-row="${index}" data-rented-qty="${line.qty}">
+          <div class="return-row-head">
+            <strong>${escapeHtml(line.name)}</strong>
+            <span class="badge">${line.qty} alugado(s)</span>
+          </div>
+          <div class="return-quantity-grid">
             <label>
-              Qtde com problema
-              <input type="number" min="0" max="${line.qty}" value="0" data-return-field="qty" data-index="${index}">
+              Boas condições
+              <input type="number" min="0" max="${line.qty}" step="1" inputmode="numeric" value="${line.qty}" data-return-field="good" data-index="${index}">
             </label>
             <label>
-              Motivo
-              <select data-return-field="reason" data-index="${index}">
-                <option value="Danificado">Danificado</option>
-                <option value="Quebrado">Quebrado</option>
-                <option value="Perdido">Perdido</option>
-                <option value="Indisponível">Indisponível</option>
-              </select>
+              Danificada
+              <input type="number" min="0" max="${line.qty}" step="1" inputmode="numeric" value="0" data-return-field="damaged" data-index="${index}">
+            </label>
+            <label>
+              Quebrada/inutilizada
+              <input type="number" min="0" max="${line.qty}" step="1" inputmode="numeric" value="0" data-return-field="broken" data-index="${index}">
+            </label>
+            <label>
+              Perdida/não devolvida
+              <input type="number" min="0" max="${line.qty}" step="1" inputmode="numeric" value="0" data-return-field="lost" data-index="${index}">
             </label>
           </div>
-        </div>
+          <label>
+            Observação deste item
+            <textarea rows="2" data-return-field="notes" data-index="${index}" placeholder="Opcional"></textarea>
+          </label>
+          <p class="return-balance muted-text" data-return-balance="${index}">${line.qty} de ${line.qty} unidade(s) classificada(s).</p>
+        </section>
       `)
       .join("");
 
     openModal("Registrar devolução", `
       <form id="returnForm">
-        <p class="muted-text">Informe somente os itens que voltaram quebrados, perdidos ou indisponíveis. O restante volta automaticamente para o estoque disponível.</p>
+        <p class="muted-text">Classifique todas as unidades devolvidas. Itens danificados vão para manutenção; itens quebrados ou perdidos saem do total do estoque.</p>
         ${rows}
         <label class="wide">
-          Observação da devolução
-          <textarea id="returnNotes" rows="3" placeholder="Ex.: 1 forro manchado, 2 cadeiras quebradas"></textarea>
+          Observação geral da devolução
+          <textarea id="returnNotes" rows="3" placeholder="Opcional"></textarea>
         </label>
         <div class="form-actions">
           <button class="secondary-action" type="button" data-close-modal="true">Cancelar</button>
@@ -2130,50 +2144,212 @@
       event.preventDefault();
       await confirmReturn(rental);
     });
+    $("#returnForm").addEventListener("input", handleReturnFormInput);
   }
 
   async function confirmReturn(rental) {
-    const problems = [];
-    const rows = $$("[data-return-field='qty']");
+    const returnItems = [];
+    const returnNotes = $("#returnNotes").value.trim();
 
-    for (const input of rows) {
-      const index = Number(input.dataset.index);
-      const line = rental.items[index];
-      const qty = Math.min(line.qty, Math.max(0, toNumber(input.value)));
-      const reason = $(`[data-return-field='reason'][data-index='${index}']`).value;
-
-      if (qty > 0) {
-        problems.push({
-          itemId: line.itemId,
-          name: line.name,
-          qty,
-          reason,
-        });
+    for (const [index, line] of rental.items.entries()) {
+      const itemId = Number(line.itemId);
+      if (!Number.isFinite(itemId)) {
+        alert(`${line.name}: este item não possui vínculo válido com o estoque.`);
+        return;
       }
+
+      const quantities = getReturnQuantities(index);
+      if (!quantities) {
+        return;
+      }
+
+      const classified = quantities.good + quantities.damaged + quantities.broken + quantities.lost;
+      const rentedQty = toWholeNumber(line.qty);
+      if (classified > rentedQty) {
+        alert(`${line.name}: a soma das quantidades não pode ser maior que ${rentedQty}.`);
+        return;
+      }
+      if (classified !== rentedQty) {
+        alert(`${line.name}: classifique todas as ${rentedQty} unidade(s) alugadas.`);
+        return;
+      }
+
+      returnItems.push({
+        itemId,
+        name: line.name,
+        rentedQty,
+        ...quantities,
+      });
     }
 
-    for (const problem of problems) {
-      const item = await PlanetaDB.get("items", Number(problem.itemId));
-      if (item) {
-        item.unavailableQty = Math.min(Number(item.totalQty) || 0, (Number(item.unavailableQty) || 0) + problem.qty);
-        item.updatedAt = new Date().toISOString();
-        await PlanetaDB.put("items", item);
+    // A mesma peça pode ter sido adicionada como avulsa e também por um conjunto.
+    // O estoque precisa receber a soma das duas linhas em uma única atualização.
+    const itemsById = new Map();
+    returnItems.forEach((returnedItem) => {
+      const previous = itemsById.get(returnedItem.itemId);
+      if (!previous) {
+        itemsById.set(returnedItem.itemId, { ...returnedItem });
+        return;
       }
-    }
 
-    await PlanetaDB.put("rentals", {
-      ...rental,
-      status: "returned",
-      returnProblems: problems,
-      returnNotes: $("#returnNotes").value.trim(),
-      returnedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      previous.rentedQty += returnedItem.rentedQty;
+      previous.good += returnedItem.good;
+      previous.damaged += returnedItem.damaged;
+      previous.broken += returnedItem.broken;
+      previous.lost += returnedItem.lost;
+      previous.notes = [previous.notes, returnedItem.notes].filter(Boolean).join(" | ");
     });
+
+    const client = getClient(rental.clientId);
+    const now = new Date().toISOString();
+    const updatedItems = [];
+    const occurrences = [];
+    const problems = [];
+
+    for (const returnedItem of itemsById.values()) {
+      const item = await PlanetaDB.get("items", returnedItem.itemId);
+      if (!item) {
+        alert(`O item "${returnedItem.name}" não foi encontrado no estoque. Corrija o cadastro antes de concluir a devolução.`);
+        return;
+      }
+
+      const removedQty = returnedItem.broken + returnedItem.lost;
+      const totalQty = toWholeNumber(item.totalQty);
+      if (removedQty > totalQty) {
+        alert(`${returnedItem.name}: não é possível retirar ${removedQty} unidade(s) de um total de ${totalQty}.`);
+        return;
+      }
+
+      updatedItems.push({
+        ...item,
+        totalQty: totalQty - removedQty,
+        maintenanceQty: getItemMaintenanceQty(item) + returnedItem.damaged,
+        brokenQty: getItemBrokenQty(item) + returnedItem.broken,
+        lostQty: getItemLostQty(item) + returnedItem.lost,
+        updatedAt: now,
+      });
+
+      const occurrenceBase = {
+        itemId: Number(item.id),
+        itemName: item.name,
+        rentalId: rental.id,
+        orderNumber: rental.orderNumber,
+        clientId: rental.clientId || null,
+        clientName: client?.name || "Cliente não encontrado",
+        occurredAt: now,
+        notes: returnedItem.notes || returnNotes,
+      };
+      const entries = [
+        { qty: returnedItem.good, status: "Devolvido em boas condições", type: "return-good" },
+        { qty: returnedItem.damaged, status: "Danificado - em manutenção", type: "return-damaged" },
+        { qty: returnedItem.broken, status: "Quebrado/inutilizado", type: "return-broken" },
+        { qty: returnedItem.lost, status: "Perdido/não devolvido", type: "return-lost" },
+      ];
+
+      entries.forEach((entry) => {
+        if (entry.qty > 0) {
+          occurrences.push({ ...occurrenceBase, ...entry });
+        }
+      });
+
+      if (returnedItem.damaged > 0) {
+        problems.push({ itemId: item.id, name: item.name, qty: returnedItem.damaged, reason: "Danificado - em manutenção" });
+      }
+      if (returnedItem.broken > 0) {
+        problems.push({ itemId: item.id, name: item.name, qty: returnedItem.broken, reason: "Quebrado/inutilizado" });
+      }
+      if (returnedItem.lost > 0) {
+        problems.push({ itemId: item.id, name: item.name, qty: returnedItem.lost, reason: "Perdido/não devolvido" });
+      }
+    }
+
+    try {
+      await PlanetaDB.completeRentalReturn({
+        ...rental,
+        status: "returned",
+        returnItems,
+        returnProblems: problems,
+        returnNotes,
+        returnedAt: now,
+        updatedAt: now,
+      }, updatedItems, occurrences);
+    } catch (error) {
+      console.error(error);
+      alert("Não foi possível registrar a devolução. Nenhuma alteração foi concluída; tente novamente.");
+      return;
+    }
 
     closeModal();
     await loadAll();
     refreshAll();
     showToast("Devolução registrada.");
+  }
+
+  function handleReturnFormInput(event) {
+    const input = event.target.closest("[data-return-field]");
+    if (!input || input.dataset.returnField === "notes") {
+      return;
+    }
+
+    const index = Number(input.dataset.index);
+    const row = $(`[data-return-row='${index}']`);
+    if (!row) {
+      return;
+    }
+
+    if (input.dataset.returnField !== "good") {
+      const rentedQty = toWholeNumber(row.dataset.rentedQty);
+      const damaged = getReturnFieldValue(index, "damaged");
+      const broken = getReturnFieldValue(index, "broken");
+      const lost = getReturnFieldValue(index, "lost");
+      const goodInput = $(`[data-return-field='good'][data-index='${index}']`);
+      goodInput.value = Math.max(0, rentedQty - damaged - broken - lost);
+    }
+
+    updateReturnBalance(index);
+  }
+
+  function updateReturnBalance(index) {
+    const row = $(`[data-return-row='${index}']`);
+    const balance = $(`[data-return-balance='${index}']`);
+    if (!row || !balance) {
+      return;
+    }
+
+    const rentedQty = toWholeNumber(row.dataset.rentedQty);
+    const quantities = getReturnQuantities(index, false);
+    if (!quantities) {
+      balance.textContent = "Informe somente números inteiros maiores ou iguais a zero.";
+      balance.classList.add("return-balance-error");
+      return;
+    }
+
+    const classified = quantities.good + quantities.damaged + quantities.broken + quantities.lost;
+    balance.textContent = `${classified} de ${rentedQty} unidade(s) classificada(s).`;
+    balance.classList.toggle("return-balance-error", classified !== rentedQty);
+  }
+
+  function getReturnQuantities(index, showAlert = true) {
+    const fields = ["good", "damaged", "broken", "lost"];
+    const values = {};
+    for (const field of fields) {
+      const input = $(`[data-return-field='${field}'][data-index='${index}']`);
+      const qty = toWholeNumber(input?.value, null);
+      if (qty === null || qty < 0) {
+        if (showAlert) {
+          alert("Informe somente quantidades inteiras maiores ou iguais a zero.");
+        }
+        return null;
+      }
+      values[field] = qty;
+    }
+
+    values.notes = $(`[data-return-field='notes'][data-index='${index}']`)?.value.trim() || "";
+    return values;
+  }
+
+  function getReturnFieldValue(index, field) {
+    return toWholeNumber($(`[data-return-field='${field}'][data-index='${index}']`)?.value, 0);
   }
 
   async function cancelRental(rental) {
@@ -2230,7 +2406,7 @@
           <input name="totalQty" type="number" min="0" inputmode="numeric" required value="${item?.totalQty ?? 0}">
         </label>
         <label>
-          Indisponível
+          Indisponível manual
           <input name="unavailableQty" type="number" min="0" inputmode="numeric" value="${item?.unavailableQty ?? 0}">
         </label>
         <label>
@@ -2259,8 +2435,13 @@
   }
 
   async function saveItemFromForm(form, item = null) {
-    const totalQty = Math.max(0, toNumber(form.totalQty.value));
-    const unavailableQty = Math.min(totalQty, Math.max(0, toNumber(form.unavailableQty.value)));
+    const totalQty = Math.max(0, toWholeNumber(form.totalQty.value, 0));
+    const maintenanceQty = getItemMaintenanceQty(item);
+    if (totalQty < maintenanceQty) {
+      alert(`A quantidade total não pode ser menor que as ${maintenanceQty} unidade(s) em manutenção.`);
+      return null;
+    }
+    const unavailableQty = Math.min(totalQty - maintenanceQty, Math.max(0, toWholeNumber(form.unavailableQty.value, 0)));
     const now = new Date().toISOString();
     const payload = {
       id: item?.id,
@@ -2269,6 +2450,9 @@
       color: form.color.value.trim(),
       totalQty,
       unavailableQty,
+      maintenanceQty,
+      brokenQty: getItemBrokenQty(item),
+      lostQty: getItemLostQty(item),
       defaultPrice: Math.max(0, toNumber(form.defaultPrice.value)),
       notes: form.notes.value.trim(),
       createdAt: item?.createdAt || now,
@@ -2313,12 +2497,29 @@
           })
           .join("")
       : emptyState("Nenhuma locação encontrada para este item.");
+    const occurrences = getItemOccurrenceHistory(item.id);
+    const occurrencesHtml = occurrences.length
+      ? occurrences
+          .map((occurrence) => `
+            <div class="compact-item item-history-row">
+              <div>
+                <strong>${escapeHtml(occurrence.status || "Ocorrência registrada")}</strong>
+                <span>${formatDateTime(occurrence.occurredAt)}${occurrence.orderNumber ? ` · Pedido ${escapeHtml(occurrence.orderNumber)}` : ""}</span>
+                <span>${escapeHtml(occurrence.clientName || "Sem cliente")}${occurrence.notes ? ` · ${escapeHtml(occurrence.notes)}` : ""}</span>
+              </div>
+              <span>${escapeHtml(occurrence.qty || 0)} un.</span>
+            </div>
+          `)
+          .join("")
+      : emptyState("Nenhuma ocorrência de devolução ou manutenção para este item.");
+    const maintenanceQty = getItemMaintenanceQty(item);
 
     openModal(`Detalhes do item`, `
       <div class="item-detail-modal">
         <div class="item-detail-tabs" role="tablist" aria-label="Detalhes do item">
-          <button class="tab-btn active" type="button" data-item-tab="info" aria-selected="true">Informacoes</button>
+          <button class="tab-btn active" type="button" data-item-tab="info" aria-selected="true">Informações</button>
           <button class="tab-btn" type="button" data-item-tab="stock" aria-selected="false">Estoque</button>
+          <button class="tab-btn" type="button" data-item-tab="maintenance" aria-selected="false">Manutenção</button>
           <button class="tab-btn" type="button" data-item-tab="rentals" aria-selected="false">Locacoes</button>
           <button class="tab-btn" type="button" data-item-tab="edit" aria-selected="false">Editar</button>
         </div>
@@ -2338,15 +2539,38 @@
           <div class="metric-grid">
             <div class="metric"><span>Total cadastrado</span><strong>${stats.total}</strong></div>
             <div class="metric"><span>Disponível no período</span><strong>${periodStats.available}</strong></div>
-            <div class="metric"><span>Ocupado no período</span><strong>${periodStats.occupied}</strong></div>
+            <div class="metric"><span>Alugado</span><strong>${stats.rentedActive}</strong></div>
+            <div class="metric"><span>Em manutenção</span><strong>${stats.maintenance}</strong></div>
+            <div class="metric"><span>Quebrado/perdido</span><strong>${stats.brokenLost}</strong></div>
             <div class="metric"><span>Reservado no período</span><strong>${periodStats.reserved}</strong></div>
-            <div class="metric"><span>Entregue/alugado</span><strong>${periodStats.delivered}</strong></div>
             <div class="metric"><span>Reservado em datas futuras</span><strong>${stats.futureReserved}</strong></div>
             <div class="metric"><span>Próxima reserva</span><strong>${stats.nextReservationDate ? formatDate(stats.nextReservationDate) : "-"}</strong></div>
-            <div class="metric"><span>Indisponivel</span><strong>${stats.unavailable}</strong></div>
-            <div class="metric"><span>Devolvido</span><strong>${stats.returned}</strong></div>
+            <div class="metric"><span>Indisponível manual</span><strong>${stats.unavailable}</strong></div>
           </div>
           ${conflictText ? `<p class="muted-text"><strong>Uso no período:</strong><br>${conflictText}</p>` : `<p class="muted-text">Nenhuma locação ocupando este item no período consultado.</p>`}
+        </section>
+
+        <section class="item-tab-panel hidden" data-item-tab-panel="maintenance">
+          <div class="detail-grid">
+            <div class="metric"><span>Em manutenção</span><strong>${maintenanceQty}</strong></div>
+            <div class="metric"><span>Quebrado/perdido (histórico)</span><strong>${stats.brokenLost}</strong></div>
+          </div>
+          <form id="maintenanceRepairForm" class="form-grid maintenance-form">
+            <label>
+              Quantidade reparada e pronta
+              <input name="qty" type="number" min="1" max="${maintenanceQty}" step="1" inputmode="numeric" ${maintenanceQty ? "required" : "disabled"}>
+            </label>
+            <label class="wide">
+              Observação do reparo
+              <textarea name="notes" rows="2" placeholder="Opcional: reparo feito, custo ou responsável" ${maintenanceQty ? "" : "disabled"}></textarea>
+            </label>
+            <div class="form-actions wide">
+              <button class="primary-action" type="submit" ${maintenanceQty ? "" : "disabled"}>Confirmar reparo</button>
+            </div>
+          </form>
+          ${maintenanceQty ? "" : `<p class="muted-text">Não há unidades em manutenção neste momento.</p>`}
+          <h3 class="detail-subtitle">Histórico de ocorrências</h3>
+          <div class="compact-list">${occurrencesHtml}</div>
         </section>
 
         <section class="item-tab-panel hidden" data-item-tab-panel="rentals">
@@ -2379,7 +2603,7 @@
               <input name="totalQty" type="number" min="0" inputmode="numeric" required value="${item.totalQty ?? 0}">
             </label>
             <label>
-              Indisponivel
+              Indisponível manual
               <input name="unavailableQty" type="number" min="0" inputmode="numeric" value="${item.unavailableQty ?? 0}">
             </label>
             <label>
@@ -2428,6 +2652,53 @@
       showToast("Item atualizado.");
       openItemDetailsModal(getItem(saved.id || item.id) || saved);
     });
+
+    const maintenanceForm = $("#maintenanceRepairForm");
+    maintenanceForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await confirmMaintenanceRepair(item, event.currentTarget);
+    });
+  }
+
+  async function confirmMaintenanceRepair(item, form) {
+    const qty = toWholeNumber(form.qty.value, null);
+    const maintenanceQty = getItemMaintenanceQty(item);
+    if (qty === null || qty < 1 || qty > maintenanceQty) {
+      alert(`Informe uma quantidade entre 1 e ${maintenanceQty}.`);
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const updatedItem = {
+      ...item,
+      maintenanceQty: maintenanceQty - qty,
+      updatedAt: now,
+    };
+    const occurrence = {
+      type: "maintenance-repaired",
+      status: "Reparado e disponível",
+      itemId: item.id,
+      itemName: item.name,
+      rentalId: null,
+      orderNumber: null,
+      clientId: null,
+      clientName: "",
+      qty,
+      notes: form.notes.value.trim(),
+      occurredAt: now,
+    };
+
+    try {
+      await PlanetaDB.updateItemWithOccurrence(updatedItem, occurrence);
+    } catch (error) {
+      console.error(error);
+      alert("Não foi possível registrar o reparo. Tente novamente.");
+      return;
+    }
+    await loadAll();
+    refreshAll();
+    showToast(`${qty} unidade(s) voltou(ram) para disponível.`);
+    openItemDetailsModal(getItem(item.id) || updatedItem);
   }
 
   function getItemRentalHistory(itemId) {
@@ -2443,6 +2714,12 @@
         const startCompare = String(a.rental.startDate || "").localeCompare(String(b.rental.startDate || ""));
         return startCompare || Number(b.rental.orderNumber || 0) - Number(a.rental.orderNumber || 0);
       });
+  }
+
+  function getItemOccurrenceHistory(itemId) {
+    return state.itemOccurrences
+      .filter((occurrence) => Number(occurrence.itemId) === Number(itemId))
+      .sort((a, b) => String(b.occurredAt || "").localeCompare(String(a.occurredAt || "")));
   }
 
   function openClientModal(client = null) {
@@ -3686,6 +3963,7 @@
       rentals: Array.isArray(data.stores.rentals) ? data.stores.rentals.length : 0,
       expenses: Array.isArray(data.stores.expenses) ? data.stores.expenses.length : 0,
       kits: Array.isArray(data.stores.kits) ? data.stores.kits.length : 0,
+      itemOccurrences: Array.isArray(data.stores.itemOccurrences) ? data.stores.itemOccurrences.length : 0,
     };
 
     return [
@@ -3693,6 +3971,7 @@
       `Conjuntos/kits: ${counts.kits}`,
       `Clientes: ${counts.clients}`,
       `Locações: ${counts.rentals}`,
+      `Ocorrências de itens: ${counts.itemOccurrences}`,
       `Gastos/parcelas: ${counts.expenses}`,
     ].join("\n");
   }
@@ -3749,8 +4028,13 @@
     const stats = {
       total: Number(item.totalQty) || 0,
       unavailable: Number(item.unavailableQty) || 0,
+      maintenance: getItemMaintenanceQty(item),
+      broken: getItemBrokenQty(item),
+      lost: getItemLostQty(item),
+      brokenLost: getItemBrokenQty(item) + getItemLostQty(item),
       reservedToday: 0,
       rentedToday: 0,
+      rentedActive: 0,
       futureReserved: 0,
       nextReservationDate: "",
       returned: 0,
@@ -3767,7 +4051,11 @@
           stats.reservedToday += qty;
         } else if (rental.status === "delivered" && datesOverlap(today, today, rental.startDate, rental.endDate)) {
           stats.rentedToday += qty;
-        } else if (rental.status === "returned") {
+        }
+        if (rental.status === "delivered") {
+          stats.rentedActive += qty;
+        }
+        if (rental.status === "returned") {
           stats.returned += qty;
         }
 
@@ -3777,7 +4065,7 @@
     const future = getFutureReservationStats(item, today);
     stats.futureReserved = future.qty;
     stats.nextReservationDate = future.nextDate;
-    stats.availableToday = Math.max(0, stats.total - stats.unavailable - stats.reservedToday - stats.rentedToday);
+    stats.availableToday = Math.max(0, stats.total - stats.unavailable - stats.maintenance - stats.reservedToday - stats.rentedToday);
     return stats;
   }
 
@@ -3794,14 +4082,16 @@
     const occupied = reserved + delivered;
     const total = Number(item?.totalQty) || 0;
     const unavailable = Number(item?.unavailableQty) || 0;
+    const maintenance = getItemMaintenanceQty(item);
 
     return {
       total,
       unavailable,
+      maintenance,
       reserved,
       delivered,
       occupied,
-      available: Math.max(0, total - unavailable - occupied),
+      available: Math.max(0, total - unavailable - maintenance - occupied),
       conflicts,
     };
   }
@@ -3876,7 +4166,7 @@
     const used = getItemPeriodConflicts(item, startDate, endDate, ignoreRentalId)
       .reduce((sum, conflict) => sum + conflict.qty, 0);
 
-    return Math.max(0, (Number(item.totalQty) || 0) - (Number(item.unavailableQty) || 0) - used);
+    return Math.max(0, (Number(item.totalQty) || 0) - (Number(item.unavailableQty) || 0) - getItemMaintenanceQty(item) - used);
   }
 
   function getItemPeriodConflicts(item, startDate, endDate, ignoreRentalId = null) {
@@ -4293,6 +4583,28 @@
 
     const parsed = Number(String(value ?? "").replace(",", "."));
     return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function toWholeNumber(value, fallback = 0) {
+    const normalized = String(value ?? "").trim().replace(",", ".");
+    if (!normalized) {
+      return fallback;
+    }
+
+    const parsed = Number(normalized);
+    return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+  }
+
+  function getItemMaintenanceQty(item) {
+    return Math.max(0, toWholeNumber(item?.maintenanceQty, 0));
+  }
+
+  function getItemBrokenQty(item) {
+    return Math.max(0, toWholeNumber(item?.brokenQty, 0));
+  }
+
+  function getItemLostQty(item) {
+    return Math.max(0, toWholeNumber(item?.lostQty, 0));
   }
 
   function roundMoney(value) {
