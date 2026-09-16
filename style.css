@@ -1073,6 +1073,23 @@ textarea:focus {
   font-size: 0.9rem;
 }
 
+.form-feedback {
+  min-height: 1.3rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.form-feedback.is-error {
+  color: var(--red-dark);
+  font-weight: 700;
+}
+
+.form-feedback.is-success {
+  color: var(--success);
+  font-weight: 700;
+}
+
 .danger-panel {
   background: var(--danger-soft);
   border-color: #f1c5cb;

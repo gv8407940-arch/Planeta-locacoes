@@ -37,7 +37,7 @@
     "6m": { label: "últimos 6 meses", months: 6 },
     "12m": { label: "últimos 12 meses", months: 12 },
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=30";
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=31";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -192,11 +192,8 @@
     $("#rentalDeposit").addEventListener("input", renderRentalTotals);
     $("#rentalStartDate").addEventListener("change", handleRentalDateChange);
     $("#rentalEndDate").addEventListener("change", handleRentalDateChange);
-    $("#rentalClientCpf").addEventListener("blur", handleRentalCpfLookup);
-    $("#rentalClientCpf").addEventListener("input", () => {
-      $("#rentalClientId").value = "";
-      $("#clientMatchInfo").textContent = "";
-    });
+    $("#rentalClientDocument").addEventListener("blur", handleRentalDocumentLookup);
+    $("#rentalClientDocument").addEventListener("input", handleRentalDocumentInput);
 
     $("#exportBackupBtn").addEventListener("click", exportBackup);
     $("#importBackupInput").addEventListener("change", importBackup);
@@ -800,7 +797,7 @@
           <span class="badge">${rentals.length} locação${rentals.length === 1 ? "" : "es"}</span>
         </div>
         <p class="muted-text">
-          ${client.document ? `Documento: ${escapeHtml(client.document)}<br>` : ""}
+          ${client.document ? `${getDocumentLabel(client.document)}: ${escapeHtml(formatDocument(client.document))}<br>` : ""}
           ${client.address ? `Endereço: ${escapeHtml(client.address)}<br>` : ""}
           ${client.notes ? `Obs.: ${escapeHtml(client.notes)}` : ""}
         </p>
@@ -831,7 +828,7 @@
     $("#rentalClientId").value = "";
     $("#newRentalTitle").textContent = "Nova locação";
     $("#rentalForm").reset();
-    $("#clientMatchInfo").textContent = "";
+    setDocumentFeedback($("#clientMatchInfo"));
     $("#rentalOrderDate").value = todayISO();
     $("#rentalStartDate").value = todayISO();
     $("#rentalEndDate").value = todayISO();
@@ -1361,10 +1358,10 @@
 
   function buildRentalFromForm(statusOverride) {
     const clientName = $("#rentalClientName").value.trim();
-    const clientCpf = $("#rentalClientCpf").value.trim();
+    const clientDocument = $("#rentalClientDocument").value.trim();
     const clientPhone = $("#rentalClientPhone").value.trim();
     const clientAddress = $("#rentalClientAddress").value.trim();
-    const cpfDigits = onlyDigits(clientCpf);
+    const documentValidation = validateDocument(clientDocument);
     const orderDate = $("#rentalOrderDate").value;
     const startDate = $("#rentalStartDate").value;
     const endDate = $("#rentalEndDate").value;
@@ -1375,14 +1372,14 @@
       return null;
     }
 
-    if (!isValidCpf(clientCpf)) {
-      $("#clientMatchInfo").textContent = "CPF inválido. Confira os 11 dígitos antes de salvar a locação.";
-      $("#rentalClientCpf").focus();
-      alert("Informe um CPF válido para continuar a locação. O CPF precisa ter 11 dígitos e dígitos verificadores corretos.");
+    if (!documentValidation.valid) {
+      setDocumentFeedback($("#clientMatchInfo"), documentValidation.message, "error");
+      $("#rentalClientDocument").focus();
+      alert(`${documentValidation.message} Corrija o documento para continuar a locação.`);
       return null;
     }
 
-    $("#rentalClientCpf").value = formatCpf(cpfDigits);
+    $("#rentalClientDocument").value = formatDocument(documentValidation.digits);
 
     if (!orderDate || !startDate || !endDate || endDate < startDate) {
       alert("Informe as datas do pedido, retirada/entrega e devolução corretamente.");
@@ -1439,7 +1436,7 @@
       clientDraft: {
         name: clientName,
         phone: clientPhone,
-        document: formatCpf(cpfDigits),
+        document: formatDocument(documentValidation.digits),
         address: clientAddress,
       },
       orderDate,
@@ -1603,7 +1600,7 @@
           <h4>Dados do cliente</h4>
           <div class="detail-grid">
             <div class="metric"><span>Nome</span><strong>${escapeHtml(client?.name || "-")}</strong></div>
-            <div class="metric"><span>CPF/CNPJ</span><strong>${escapeHtml(client?.document || "-")}</strong></div>
+            <div class="metric"><span>${getDocumentLabel(client?.document)}</span><strong>${escapeHtml(client?.document ? formatDocument(client.document) : "-")}</strong></div>
             <div class="metric"><span>Telefone</span><strong>${escapeHtml(client?.phone || "-")}</strong></div>
             <div class="metric"><span>Endereco</span><strong>${escapeHtml(client?.address || "-")}</strong></div>
           </div>
@@ -2035,10 +2032,10 @@
     $("#rentalId").value = rental.id;
     $("#rentalClientId").value = rental.clientId || "";
     $("#rentalClientName").value = client?.name || "";
-    $("#rentalClientCpf").value = client?.document || "";
+    $("#rentalClientDocument").value = formatDocument(client?.document || "");
     $("#rentalClientPhone").value = client?.phone || "";
     $("#rentalClientAddress").value = client?.address || "";
-    $("#clientMatchInfo").textContent = client ? `Cliente associado: ${client.name}` : "";
+    setDocumentFeedback($("#clientMatchInfo"), client ? `Cliente associado: ${client.name}` : "", client ? "success" : "");
     $("#rentalOrderDate").value = rental.orderDate || todayISO();
     $("#rentalStartDate").value = rental.startDate;
     $("#rentalEndDate").value = rental.endDate;
@@ -2736,8 +2733,9 @@
         </label>
         <label>
           CPF ou CNPJ
-          <input name="document" type="text" value="${escapeAttr(client?.document || "")}">
+          <input id="clientDocumentInput" name="document" type="text" inputmode="numeric" autocomplete="off" maxlength="18" placeholder="000.000.000-00 ou 00.000.000/0000-00" value="${escapeAttr(formatDocument(client?.document || ""))}">
         </label>
+        <p id="clientDocumentInfo" class="form-feedback wide" role="status" aria-live="polite"></p>
         <label class="wide">
           Endereço
           <input name="address" type="text" value="${escapeAttr(client?.address || "")}">
@@ -2753,15 +2751,29 @@
       </form>
     `);
 
+    const documentInput = $("#clientDocumentInput");
+    documentInput.addEventListener("input", () => {
+      documentInput.value = formatDocument(documentInput.value);
+      setDocumentFeedback($("#clientDocumentInfo"));
+    });
+    documentInput.addEventListener("blur", () => {
+      validateClientDocumentField(client, true);
+    });
+
     $("#clientForm").addEventListener("submit", async (event) => {
       event.preventDefault();
       const form = event.currentTarget;
+      const documentValidation = validateClientDocumentField(client, true);
+      if (!documentValidation) {
+        documentInput.focus();
+        return;
+      }
       const now = new Date().toISOString();
       const payload = {
         id: client?.id,
         name: form.name.value.trim(),
         phone: form.phone.value.trim(),
-        document: form.document.value.trim(),
+        document: formatDocument(documentValidation.digits),
         address: form.address.value.trim(),
         notes: form.notes.value.trim(),
         createdAt: client?.createdAt || now,
@@ -2829,7 +2841,7 @@
           <div>
             <strong>Cliente:</strong> ${escapeHtml(client?.name || "Cliente não encontrado")}<br>
             <strong>Telefone:</strong> ${escapeHtml(client?.phone || "-")}<br>
-            <strong>Documento:</strong> ${escapeHtml(client?.document || "-")}<br>
+            <strong>${getDocumentLabel(client?.document)}:</strong> ${escapeHtml(client?.document ? formatDocument(client.document) : "-")}<br>
             <strong>Endereço:</strong> ${escapeHtml(client?.address || "-")}
           </div>
           <div>
@@ -2994,7 +3006,8 @@
       data_emissao: formatDate(todayISO()),
       nome_cliente: escapeHtml(client?.name || ""),
       telefone_cliente: escapeHtml(client?.phone || ""),
-      cpf_cnpj: escapeHtml(client?.document || ""),
+      documento_label: escapeHtml(getDocumentLabel(client?.document)),
+      cpf_cnpj: escapeHtml(client?.document ? formatDocument(client.document) : ""),
       endereco_cliente: escapeHtml(client?.address || ""),
       referencia_endereco: "",
       periodo: escapeHtml(`${formatDate(rental.startDate)} a ${formatDate(rental.endDate)}`),
@@ -4363,17 +4376,21 @@
     return "yellow";
   }
 
-  function findClientByCpfDigits(cpfDigits) {
-    return state.clients.find((client) => onlyDigits(client.document) === cpfDigits);
+  function findClientByDocumentDigits(documentDigits) {
+    if (!documentDigits) {
+      return null;
+    }
+
+    return state.clients.find((client) => onlyDigits(client.document) === documentDigits) || null;
   }
 
   async function ensureRentalClient(clientDraft, currentClientId = null) {
     const now = new Date().toISOString();
-    const cpfDigits = onlyDigits(clientDraft.document);
-    const existingByCpf = findClientByCpfDigits(cpfDigits);
+    const documentDigits = onlyDigits(clientDraft.document);
+    const existingByDocument = findClientByDocumentDigits(documentDigits);
     const currentClient = currentClientId ? getClient(currentClientId) : null;
-    const canReuseCurrent = currentClient && (!onlyDigits(currentClient.document) || onlyDigits(currentClient.document) === cpfDigits);
-    const target = existingByCpf || (canReuseCurrent ? currentClient : null);
+    const canReuseCurrent = currentClient && (!onlyDigits(currentClient.document) || onlyDigits(currentClient.document) === documentDigits);
+    const target = existingByDocument || (canReuseCurrent ? currentClient : null);
 
     if (target) {
       const payload = {
@@ -4401,28 +4418,35 @@
     return { ...payload, id };
   }
 
-  function handleRentalCpfLookup() {
-    const cpfInput = $("#rentalClientCpf");
-    const cpfDigits = onlyDigits(cpfInput.value);
+  function handleRentalDocumentInput() {
+    const documentInput = $("#rentalClientDocument");
+    documentInput.value = formatDocument(documentInput.value);
+    $("#rentalClientId").value = "";
+    setDocumentFeedback($("#clientMatchInfo"));
+  }
+
+  function handleRentalDocumentLookup() {
+    const documentInput = $("#rentalClientDocument");
+    const validation = validateDocument(documentInput.value);
     const info = $("#clientMatchInfo");
 
     $("#rentalClientId").value = "";
-    info.textContent = "";
 
-    if (!cpfDigits) {
+    if (!validation.digits) {
+      setDocumentFeedback(info, "Informe um CPF com 11 dígitos ou um CNPJ com 14 dígitos.", "error");
       return;
     }
 
-    if (!isValidCpf(cpfDigits)) {
-      info.textContent = "CPF inválido. Confira os 11 dígitos antes de salvar a locação.";
+    if (!validation.valid) {
+      setDocumentFeedback(info, validation.message, "error");
       return;
     }
 
-    cpfInput.value = formatCpf(cpfDigits);
-    const client = findClientByCpfDigits(cpfDigits);
+    documentInput.value = formatDocument(validation.digits);
+    const client = findClientByDocumentDigits(validation.digits);
 
     if (!client) {
-      info.textContent = "CPF válido. Um novo cliente será criado ao salvar a locação.";
+      setDocumentFeedback(info, `${validation.type} válido. Um novo cliente será criado ao salvar a locação.`, "success");
       return;
     }
 
@@ -4436,7 +4460,30 @@
     if (!$("#rentalClientAddress").value.trim()) {
       $("#rentalClientAddress").value = client.address || "";
     }
-    info.textContent = `Cliente encontrado: ${client.name}`;
+    setDocumentFeedback(info, `Cliente encontrado: ${client.name}`, "success");
+  }
+
+  function validateClientDocumentField(client, showSuccess = false) {
+    const input = $("#clientDocumentInput");
+    const info = $("#clientDocumentInfo");
+    const validation = validateDocument(input.value);
+
+    if (!validation.valid) {
+      setDocumentFeedback(info, validation.message, "error");
+      return null;
+    }
+
+    input.value = formatDocument(validation.digits);
+    const existing = findClientByDocumentDigits(validation.digits);
+    if (existing && Number(existing.id) !== Number(client?.id)) {
+      setDocumentFeedback(info, `${validation.type} já cadastrado para ${existing.name}. Use o cadastro existente para evitar duplicidade.`, "error");
+      return null;
+    }
+
+    if (showSuccess) {
+      setDocumentFeedback(info, `${validation.type} válido.`, "success");
+    }
+    return validation;
   }
 
   function getItem(id) {
@@ -4615,13 +4662,90 @@
     return String(value || "").replace(/\D/g, "");
   }
 
-  function formatCpf(value) {
-    const digits = onlyDigits(value);
-    if (digits.length !== 11) {
-      return digits;
+  function formatDocument(value) {
+    const digits = onlyDigits(value).slice(0, 14);
+    if (!digits) {
+      return "";
     }
 
-    return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
+    if (digits.length <= 11) {
+      const parts = [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6, 9), digits.slice(9, 11)];
+      let formatted = parts[0];
+      if (parts[1]) formatted += `.${parts[1]}`;
+      if (parts[2]) formatted += `.${parts[2]}`;
+      if (parts[3]) formatted += `-${parts[3]}`;
+      return formatted;
+    }
+
+    const parts = [digits.slice(0, 2), digits.slice(2, 5), digits.slice(5, 8), digits.slice(8, 12), digits.slice(12, 14)];
+    let formatted = parts[0];
+    if (parts[1]) formatted += `.${parts[1]}`;
+    if (parts[2]) formatted += `.${parts[2]}`;
+    if (parts[3]) formatted += `/${parts[3]}`;
+    if (parts[4]) formatted += `-${parts[4]}`;
+    return formatted;
+  }
+
+  function getDocumentLabel(value) {
+    const digits = onlyDigits(value);
+    if (digits.length === 11) {
+      return "CPF";
+    }
+    if (digits.length === 14) {
+      return "CNPJ";
+    }
+    return "Documento";
+  }
+
+  function validateDocument(value) {
+    const digits = onlyDigits(value);
+    const type = getDocumentLabel(digits);
+
+    if (digits.length === 11) {
+      const valid = isValidCpf(digits);
+      return {
+        digits,
+        type,
+        valid,
+        message: valid
+          ? ""
+          : "CPF inválido. Confira os 11 dígitos e os dígitos verificadores.",
+      };
+    }
+
+    if (digits.length === 14) {
+      const valid = isValidCnpj(digits);
+      return {
+        digits,
+        type,
+        valid,
+        message: valid
+          ? ""
+          : "CNPJ inválido. Confira os 14 dígitos e os dígitos verificadores.",
+      };
+    }
+
+    return {
+      digits,
+      type: "",
+      valid: false,
+      message: "Informe um CPF com 11 dígitos ou um CNPJ com 14 dígitos.",
+    };
+  }
+
+  function setDocumentFeedback(element, message = "", variant = "") {
+    if (!element) {
+      return;
+    }
+
+    element.textContent = message;
+    element.classList.remove("is-error", "is-success");
+    if (variant === "error") {
+      element.classList.add("is-error");
+    }
+    if (variant === "success") {
+      element.classList.add("is-success");
+    }
   }
 
   function isValidCpf(value) {
@@ -4652,6 +4776,27 @@
     }
 
     return secondDigit === Number(cpf[10]);
+  }
+
+  function isValidCnpj(value) {
+    const cnpj = onlyDigits(value);
+    if (cnpj.length !== 14 || /^(\d)\1{13}$/.test(cnpj)) {
+      return false;
+    }
+
+    const calculateDigit = (base, weights) => {
+      const sum = base.split("").reduce((total, digit, index) => total + Number(digit) * weights[index], 0);
+      const remainder = sum % 11;
+      return remainder < 2 ? 0 : 11 - remainder;
+    };
+
+    const firstDigit = calculateDigit(cnpj.slice(0, 12), [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+    if (firstDigit !== Number(cnpj[12])) {
+      return false;
+    }
+
+    const secondDigit = calculateDigit(cnpj.slice(0, 13), [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+    return secondDigit === Number(cnpj[13]);
   }
 
   function normalize(value) {
