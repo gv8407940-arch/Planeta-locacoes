@@ -37,7 +37,7 @@
     "6m": { label: "últimos 6 meses", months: 6 },
     "12m": { label: "últimos 12 meses", months: 12 },
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=31";
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=32";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -182,14 +182,16 @@
     $("#addRentalItemBtn").addEventListener("click", addCurrentRentalItem);
     $("#addRentalKitBtn").addEventListener("click", addCurrentRentalKit);
     $("#rentalItemsEditor").addEventListener("input", handleRentalLineInput);
+    $("#rentalItemsEditor").addEventListener("blur", handleRentalLineBlur, true);
     $("#rentalItemsEditor").addEventListener("click", handleRentalLineClick);
     $("#rentalDailyPricingToggle").addEventListener("change", handleDailyPricingToggle);
     $("#dailyPricingEditor").addEventListener("input", handleDailyPricingInput);
+    $("#dailyPricingEditor").addEventListener("blur", handleDailyPricingBlur, true);
     $("#dailyPricingEditor").addEventListener("change", handleDailyPricingInput);
     $("#dailyPricingEditor").addEventListener("click", handleDailyPricingClick);
-    $("#rentalDiscount").addEventListener("input", renderRentalTotals);
-    $("#rentalFreight").addEventListener("input", renderRentalTotals);
-    $("#rentalDeposit").addEventListener("input", renderRentalTotals);
+    bindMoneyInput($("#rentalDiscount"), renderRentalTotals);
+    bindMoneyInput($("#rentalFreight"), renderRentalTotals);
+    bindMoneyInput($("#rentalDeposit"), renderRentalTotals);
     $("#rentalStartDate").addEventListener("change", handleRentalDateChange);
     $("#rentalEndDate").addEventListener("change", handleRentalDateChange);
     $("#rentalClientDocument").addEventListener("blur", handleRentalDocumentLookup);
@@ -862,7 +864,7 @@
         itemId: item.id,
         name: item.name,
         qty,
-        unitPrice: Number(item.defaultPrice) || 0,
+        unitPrice: toNumber(item.defaultPrice),
       });
     }
 
@@ -906,7 +908,7 @@
           itemId: item.id,
           name: item.name,
           qty: generatedQty,
-          unitPrice: Number(item.defaultPrice) || 0,
+          unitPrice: toNumber(item.defaultPrice),
           originType: "kit",
           originName: kit.name,
           originKitId: kit.id,
@@ -963,7 +965,7 @@
               </label>
               <label>
                 Valor unit.
-                <input type="number" min="0" step="0.01" inputmode="decimal" value="${line.unitPrice}" data-line-field="unitPrice" data-index="${index}">
+                <input type="text" inputmode="decimal" autocomplete="off" value="${escapeAttr(formatMoneyInput(line.unitPrice))}" data-line-field="unitPrice" data-index="${index}">
               </label>
             </div>
             <div class="mini-actions">
@@ -1004,11 +1006,30 @@
       return;
     }
 
-    const value = field === "qty" ? Math.max(1, toNumber(event.target.value)) : Math.max(0, toNumber(event.target.value));
-    state.currentRentalItems[index][field] = value;
+    if (field === "qty") {
+      state.currentRentalItems[index][field] = Math.max(1, toNumber(event.target.value));
+    } else {
+      const parsed = updateMoneyFieldValidity(event.target);
+      if (parsed.valid) {
+        state.currentRentalItems[index][field] = parsed.value;
+      }
+    }
     syncDailyPricingRows();
     renderDailyPricingEditor();
     renderRentalTotals();
+  }
+
+  function handleRentalLineBlur(event) {
+    if (event.target.dataset.lineField !== "unitPrice") {
+      return;
+    }
+
+    const parsed = updateMoneyFieldValidity(event.target, true);
+    const index = Number(event.target.dataset.index);
+    if (parsed.valid && parsed.complete && state.currentRentalItems[index]) {
+      state.currentRentalItems[index].unitPrice = parsed.value;
+      renderRentalTotals();
+    }
   }
 
   function handleRentalLineClick(event) {
@@ -1083,7 +1104,7 @@
                     </label>
                     <label>
                       Valor por ${escapeHtml(row.unitLabel || "unidade")}
-                      <input type="number" min="0" step="0.01" inputmode="decimal" value="${escapeAttr(day.unitPrice)}" data-daily-field="unitPrice" data-row-index="${rowIndex}" data-day-index="${dayIndex}">
+                      <input type="text" inputmode="decimal" autocomplete="off" value="${escapeAttr(formatMoneyInput(day.unitPrice))}" data-daily-field="unitPrice" data-row-index="${rowIndex}" data-day-index="${dayIndex}">
                     </label>
                     <div class="daily-day-foot">
                       <span>${formatMoney(dayTotal)}</span>
@@ -1123,10 +1144,27 @@
       day.charge = event.target.checked;
       renderDailyPricingEditor();
     } else if (field === "unitPrice") {
-      day.unitPrice = Math.max(0, toNumber(event.target.value));
+      const parsed = updateMoneyFieldValidity(event.target);
+      if (parsed.valid) {
+        day.unitPrice = parsed.value;
+      }
     }
 
     renderRentalTotals();
+  }
+
+  function handleDailyPricingBlur(event) {
+    if (event.target.dataset.dailyField !== "unitPrice") {
+      return;
+    }
+
+    const parsed = updateMoneyFieldValidity(event.target, true);
+    const row = state.dailyPricingRows[Number(event.target.dataset.rowIndex)];
+    const day = row?.days?.[Number(event.target.dataset.dayIndex)];
+    if (parsed.valid && parsed.complete && day) {
+      day.unitPrice = parsed.value;
+      renderRentalTotals();
+    }
   }
 
   function handleDailyPricingClick(event) {
@@ -1383,6 +1421,17 @@
 
     if (!orderDate || !startDate || !endDate || endDate < startDate) {
       alert("Informe as datas do pedido, retirada/entrega e devolução corretamente.");
+      return null;
+    }
+
+    const rentalMoneyFields = [
+      ...$$("[data-line-field='unitPrice']", $("#rentalItemsEditor")).map((input, index) => ({ input, label: `Valor unitário do item ${index + 1}` })),
+      ...$$("[data-daily-field='unitPrice']", $("#dailyPricingEditor")).map((input) => ({ input, label: "Valor da diária" })),
+      { input: $("#rentalDiscount"), label: "Desconto" },
+      { input: $("#rentalFreight"), label: "Frete" },
+      { input: $("#rentalDeposit"), label: "Sinal" },
+    ];
+    if (!validateMoneyFields(rentalMoneyFields)) {
       return null;
     }
 
@@ -2040,9 +2089,9 @@
     $("#rentalStartDate").value = rental.startDate;
     $("#rentalEndDate").value = rental.endDate;
     $("#rentalEventLocation").value = rental.eventLocation || "";
-    $("#rentalDiscount").value = rental.discount || 0;
-    $("#rentalFreight").value = rental.freight || 0;
-    $("#rentalDeposit").value = rental.deposit || 0;
+    $("#rentalDiscount").value = formatMoneyInput(rental.discount || 0);
+    $("#rentalFreight").value = formatMoneyInput(rental.freight || 0);
+    $("#rentalDeposit").value = formatMoneyInput(rental.deposit || 0);
     $("#rentalPaymentMethod").value = rental.paymentMethod || "Pix";
     $("#rentalPaymentStatus").value = rental.paymentStatus || "unpaid";
     $("#rentalStatus").value = rental.status || "quote";
@@ -2408,7 +2457,7 @@
         </label>
         <label>
           Valor padrão
-          <input name="defaultPrice" type="number" min="0" step="0.01" inputmode="decimal" value="${item?.defaultPrice ?? 0}">
+          <input name="defaultPrice" type="text" inputmode="decimal" autocomplete="off" value="${escapeAttr(formatMoneyInput(item?.defaultPrice ?? 0))}">
         </label>
         <label class="wide">
           Observações
@@ -2421,9 +2470,14 @@
       </form>
     `);
 
-    $("#itemForm").addEventListener("submit", async (event) => {
+    const itemForm = $("#itemForm");
+    bindMoneyInput(itemForm.defaultPrice);
+    itemForm.addEventListener("submit", async (event) => {
       event.preventDefault();
-      await saveItemFromForm(event.currentTarget, item);
+      const saved = await saveItemFromForm(event.currentTarget, item);
+      if (!saved) {
+        return;
+      }
       closeModal();
       await loadAll();
       refreshAll();
@@ -2434,6 +2488,10 @@
   async function saveItemFromForm(form, item = null) {
     const totalQty = Math.max(0, toWholeNumber(form.totalQty.value, 0));
     const maintenanceQty = getItemMaintenanceQty(item);
+    const defaultPrice = validateMoneyField(form.defaultPrice, "Valor padrão");
+    if (defaultPrice === null) {
+      return null;
+    }
     if (totalQty < maintenanceQty) {
       alert(`A quantidade total não pode ser menor que as ${maintenanceQty} unidade(s) em manutenção.`);
       return null;
@@ -2450,7 +2508,7 @@
       maintenanceQty,
       brokenQty: getItemBrokenQty(item),
       lostQty: getItemLostQty(item),
-      defaultPrice: Math.max(0, toNumber(form.defaultPrice.value)),
+      defaultPrice,
       notes: form.notes.value.trim(),
       createdAt: item?.createdAt || now,
       updatedAt: now,
@@ -2605,7 +2663,7 @@
             </label>
             <label>
               Valor padrao
-              <input name="defaultPrice" type="number" min="0" step="0.01" inputmode="decimal" value="${item.defaultPrice ?? 0}">
+              <input name="defaultPrice" type="text" inputmode="decimal" autocomplete="off" value="${escapeAttr(formatMoneyInput(item.defaultPrice ?? 0))}">
             </label>
             <label class="wide">
               Observacoes
@@ -2637,7 +2695,9 @@
       });
     });
 
-    $("#itemDetailsForm").addEventListener("submit", async (event) => {
+    const itemDetailsForm = $("#itemDetailsForm");
+    bindMoneyInput(itemDetailsForm.defaultPrice);
+    itemDetailsForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const saved = await saveItemFromForm(event.currentTarget, item);
       if (!saved) {
@@ -3656,7 +3716,7 @@
         </label>
         <label>
           Valor
-          <input name="amount" type="number" min="0" step="0.01" inputmode="decimal" required value="${expense?.amount ?? 0}">
+          <input name="amount" type="text" inputmode="decimal" autocomplete="off" required value="${escapeAttr(formatMoneyInput(expense?.amount ?? 0))}">
         </label>
         <label>
           ${isInstallment ? "Data de vencimento" : "Data"}
@@ -3688,10 +3748,16 @@
       </form>
     `);
 
-    $("#expenseForm").addEventListener("submit", async (event) => {
+    const expenseForm = $("#expenseForm");
+    bindMoneyInput(expenseForm.amount);
+    expenseForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const form = event.currentTarget;
       const now = new Date().toISOString();
+      const amount = validateMoneyField(form.amount, "Valor", { required: true });
+      if (amount === null) {
+        return;
+      }
 
       if (form.status.value === "installment") {
         closeModal();
@@ -3699,7 +3765,7 @@
           description: form.description.value.trim(),
           category: form.category.value.trim(),
           expenseType: form.expenseType.value,
-          totalAmount: Math.max(0, toNumber(form.amount.value)),
+          totalAmount: amount,
           paymentMethod: form.paymentMethod.value,
           notes: form.notes.value.trim(),
         });
@@ -3712,7 +3778,7 @@
         expenseType: form.expenseType.value,
         description: form.description.value.trim(),
         category: form.category.value.trim() || "Outro",
-        amount: Math.max(0, toNumber(form.amount.value)),
+        amount,
         paymentMethod: form.paymentMethod.value,
         status: form.status.value,
         notes: form.notes.value.trim(),
@@ -3774,7 +3840,7 @@
         </label>
         <label>
           Valor total
-          <input name="totalAmount" type="number" min="0" step="0.01" inputmode="decimal" required value="${escapeAttr(totalAmount)}">
+          <input name="totalAmount" type="text" inputmode="decimal" autocomplete="off" required value="${escapeAttr(formatMoneyInput(totalAmount))}">
         </label>
         <label>
           Primeiro vencimento
@@ -3786,7 +3852,7 @@
         </label>
         <label>
           Valor de cada parcela
-          <input name="amount" type="number" min="0" step="0.01" inputmode="decimal" readonly>
+          <input name="amount" type="text" inputmode="decimal" readonly>
         </label>
         <label>
           Vencimento das próximas parcelas
@@ -3822,16 +3888,20 @@
     const syncInstallmentAmount = () => {
       const total = Math.max(0, toNumber(form.totalAmount.value));
       const installments = Math.max(1, Math.floor(toNumber(form.installmentTotal.value)));
-      form.amount.value = installments ? roundMoney(total / installments).toFixed(2) : "0.00";
+      form.amount.value = formatMoneyInput(installments ? roundMoney(total / installments) : 0);
     };
-    form.totalAmount.addEventListener("input", syncInstallmentAmount);
+    bindMoneyInput(form.totalAmount, syncInstallmentAmount);
     form.installmentTotal.addEventListener("input", syncInstallmentAmount);
     syncInstallmentAmount();
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const total = Math.max(1, Math.floor(toNumber(form.installmentTotal.value)));
-      const totalAmountValue = roundMoney(toNumber(form.totalAmount.value));
+      const totalAmount = validateMoneyField(form.totalAmount, "Valor total", { required: true });
+      if (totalAmount === null) {
+        return;
+      }
+      const totalAmountValue = roundMoney(totalAmount);
       const baseAmount = roundMoney(totalAmountValue / total);
 
       if (!form.description.value.trim() || !totalAmountValue || !form.dueDate.value) {
@@ -4623,13 +4693,165 @@
     return moneyFormatter.format(toNumber(value));
   }
 
-  function toNumber(value) {
+  function formatMoneyInput(value) {
+    return new Intl.NumberFormat("pt-BR", {
+      maximumFractionDigits: 2,
+    }).format(roundMoney(value));
+  }
+
+  function parseBrazilianMoney(value) {
+    const result = (amount, valid, complete, empty, message = "") => ({
+      value: amount,
+      valid,
+      complete,
+      empty,
+      message,
+    });
+
     if (typeof value === "number") {
-      return Number.isFinite(value) ? value : 0;
+      if (!Number.isFinite(value)) {
+        return result(0, false, true, false, "Informe um valor numérico válido.");
+      }
+      if (value < 0) {
+        return result(0, false, true, false, "O valor não pode ser negativo.");
+      }
+      return result(value, true, true, false);
     }
 
-    const parsed = Number(String(value ?? "").replace(",", "."));
-    return Number.isFinite(parsed) ? parsed : 0;
+    const raw = String(value ?? "").trim();
+    if (!raw) {
+      return result(0, true, true, true);
+    }
+
+    const normalized = raw.replace(/\s+/g, "");
+    if (normalized.startsWith("-")) {
+      return result(0, false, true, false, "O valor não pode ser negativo.");
+    }
+    if (!/^\d[\d.,]*$/.test(normalized)) {
+      return result(0, false, true, false, "Use apenas números, vírgula ou ponto.");
+    }
+
+    const hasComma = normalized.includes(",");
+    const hasDot = normalized.includes(".");
+    let integerDigits = "";
+    let fractionDigits = "";
+    let complete = true;
+
+    if (hasComma && hasDot) {
+      const decimalSeparator = normalized.lastIndexOf(",") > normalized.lastIndexOf(".") ? "," : ".";
+      const thousandsSeparator = decimalSeparator === "," ? "." : ",";
+      const decimalIndex = normalized.lastIndexOf(decimalSeparator);
+      const integerPart = normalized.slice(0, decimalIndex);
+      fractionDigits = normalized.slice(decimalIndex + 1);
+      const groupingPattern = thousandsSeparator === "." ? /^\d{1,3}(?:\.\d{3})+$/ : /^\d{1,3}(?:,\d{3})+$/;
+
+      if (
+        integerPart.includes(decimalSeparator) ||
+        (fractionDigits && /[.,]/.test(fractionDigits)) ||
+        (!/^\d+$/.test(integerPart) && !groupingPattern.test(integerPart))
+      ) {
+        return result(0, false, true, false, "Use um formato de moeda válido, como 1.234,56.");
+      }
+      integerDigits = integerPart.split(thousandsSeparator).join("");
+    } else if (hasComma) {
+      const parts = normalized.split(",");
+      if (parts.length !== 2 || !/^\d+$/.test(parts[0])) {
+        return result(0, false, true, false, "Use um formato de moeda válido, como 2,50.");
+      }
+      [integerDigits, fractionDigits] = parts;
+    } else if (hasDot) {
+      const parts = normalized.split(".");
+      const groupingPattern = /^\d{1,3}(?:\.\d{3})+$/;
+      if (parts.length === 2 && parts[1].length <= 2 && /^\d+$/.test(parts[0])) {
+        [integerDigits, fractionDigits] = parts;
+      } else if (groupingPattern.test(normalized)) {
+        integerDigits = normalized.replace(/\./g, "");
+      } else {
+        return result(0, false, true, false, "Use no máximo duas casas decimais.");
+      }
+    } else {
+      integerDigits = normalized;
+    }
+
+    if (!integerDigits || !/^\d+$/.test(integerDigits)) {
+      return result(0, false, true, false, "Informe um valor numérico válido.");
+    }
+    if (fractionDigits.length > 2) {
+      return result(0, false, true, false, "Use no máximo duas casas decimais.");
+    }
+    if (!fractionDigits && (normalized.endsWith(",") || normalized.endsWith("."))) {
+      complete = false;
+    }
+
+    const amount = Number(fractionDigits ? `${integerDigits}.${fractionDigits}` : integerDigits);
+    if (!Number.isFinite(amount)) {
+      return result(0, false, true, false, "Informe um valor numérico válido.");
+    }
+    return result(amount, true, complete, false);
+  }
+
+  function updateMoneyFieldValidity(input, normalizeValue = false) {
+    const parsed = parseBrazilianMoney(input?.value);
+    if (!input) {
+      return parsed;
+    }
+
+    if (!parsed.valid) {
+      input.setCustomValidity(parsed.message);
+    } else if (!parsed.complete) {
+      input.setCustomValidity("Finalize o valor com até duas casas decimais.");
+    } else {
+      input.setCustomValidity("");
+      if (normalizeValue && !parsed.empty) {
+        input.value = formatMoneyInput(parsed.value);
+      }
+    }
+    return parsed;
+  }
+
+  function bindMoneyInput(input, onChange = null) {
+    if (!input) {
+      return;
+    }
+
+    input.addEventListener("input", () => {
+      const parsed = updateMoneyFieldValidity(input);
+      onChange?.(parsed);
+    });
+    input.addEventListener("blur", () => {
+      const parsed = updateMoneyFieldValidity(input, true);
+      onChange?.(parsed);
+    });
+  }
+
+  function validateMoneyField(input, label, options = {}) {
+    const parsed = updateMoneyFieldValidity(input, true);
+    const isRequired = options.required === true;
+    if (!parsed.valid || !parsed.complete || (isRequired && parsed.value <= 0)) {
+      const detail = !parsed.valid
+        ? parsed.message
+        : !parsed.complete
+          ? "Finalize o valor com até duas casas decimais."
+          : "Informe um valor maior que zero.";
+      input?.focus();
+      alert(`${label}: ${detail}`);
+      return null;
+    }
+    return roundMoney(parsed.value);
+  }
+
+  function validateMoneyFields(fields) {
+    for (const field of fields) {
+      if (validateMoneyField(field.input, field.label, field.options) === null) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function toNumber(value) {
+    const parsed = parseBrazilianMoney(value);
+    return parsed.valid ? parsed.value : 0;
   }
 
   function toWholeNumber(value, fallback = 0) {
