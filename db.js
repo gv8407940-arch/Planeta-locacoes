@@ -2,7 +2,9 @@
   "use strict";
 
   const DB_NAME = "planeta-locacoes";
-  const DB_VERSION = 4;
+  // Mantem compatibilidade com os dados criados pelas versoes mais recentes do app.
+  // Nenhuma store existente e removida ou alterada por esta atualizacao.
+  const DB_VERSION = 5;
   const STORES = ["items", "clients", "rentals", "expenses", "kits", "meta"];
 
   function open() {

@@ -37,7 +37,7 @@
     "6m": { label: "últimos 6 meses", months: 6 },
     "12m": { label: "últimos 12 meses", months: 12 },
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=28";
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=29";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
