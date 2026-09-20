@@ -37,7 +37,7 @@
     "6m": { label: "últimos 6 meses", months: 6 },
     "12m": { label: "últimos 12 meses", months: 12 },
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=33";
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=34";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -64,6 +64,7 @@
     deferredInstallPrompt: null,
     contractTemplate: null,
     contractRequestId: 0,
+    preparedContractPdf: null,
     stockViewMode: "detailed",
     dailyPricingEnabled: false,
     dailyPricingRows: [],
@@ -3031,7 +3032,9 @@
         <p id="contractPreviewStatus" class="muted-text" role="status" aria-live="polite">Carregando a prévia...</p>
         <div class="form-actions no-print">
           <button class="secondary-action" type="button" data-close-modal="true">Fechar</button>
-          <button class="primary-action" type="button" id="printReceiptBtn" disabled>Gerar PDF / imprimir</button>
+          <button class="primary-action" type="button" id="generatePdfBtn" disabled>Gerar PDF</button>
+          <button class="secondary-action" type="button" id="savePdfBtn" disabled>Salvar PDF</button>
+          <button class="secondary-action" type="button" id="printReceiptBtn" disabled>Imprimir no navegador</button>
           <button class="primary-action red" type="button" id="shareReceiptBtn">Compartilhar resumo</button>
         </div>
       `);
@@ -3039,15 +3042,21 @@
       const frame = $("#contractPreviewFrame");
       frame.addEventListener("load", () => {
         const printButton = $("#printReceiptBtn");
+        const generateButton = $("#generatePdfBtn");
         const status = $("#contractPreviewStatus");
         if (printButton) {
           printButton.disabled = false;
         }
+        if (generateButton) {
+          generateButton.disabled = false;
+        }
         if (status) {
-          status.textContent = "Prévia pronta. Toque em Gerar PDF / imprimir para salvar ou imprimir o contrato.";
+          status.textContent = "Prévia pronta. Toque em Gerar PDF para criar o arquivo do contrato.";
         }
       }, { once: true });
       frame.srcdoc = contractHtml;
+      $("#generatePdfBtn").addEventListener("click", () => prepareContractPdf(frame, context.rental));
+      $("#savePdfBtn").addEventListener("click", () => savePreparedContractPdf());
       $("#printReceiptBtn").addEventListener("click", () => printContractFrame(frame));
       $("#shareReceiptBtn").addEventListener("click", () => shareReceipt(context.rental, context.client));
       return true;
@@ -3224,6 +3233,172 @@
       console.error(error);
       alert("Não foi possível abrir a impressão. Tente novamente após a prévia terminar de carregar.");
     }
+  }
+
+  async function prepareContractPdf(frame, rental) {
+    if (!frame?.contentDocument || frame.contentDocument.readyState !== "complete") {
+      alert("A prévia do contrato ainda está carregando. Aguarde um instante e tente novamente.");
+      return;
+    }
+
+    if (typeof window.html2pdf !== "function") {
+      alert("O gerador de PDF não carregou. Feche o contrato, atualize o aplicativo e tente novamente.");
+      return;
+    }
+
+    const page = frame.contentDocument.querySelector(".page");
+    if (!page) {
+      alert("Não foi possível preparar o conteúdo do contrato para PDF.");
+      return;
+    }
+
+    const generateButton = $("#generatePdfBtn");
+    const saveButton = $("#savePdfBtn");
+    const status = $("#contractPreviewStatus");
+    if (generateButton) {
+      generateButton.disabled = true;
+      generateButton.textContent = "Gerando PDF...";
+    }
+    if (status) {
+      status.textContent = "Gerando o PDF no aparelho. Isso pode levar alguns segundos.";
+    }
+
+    try {
+      const filename = getContractPdfFilename(rental);
+      const worker = window.html2pdf()
+        .set({
+          margin: 4.5,
+          filename,
+          image: { type: "jpeg", quality: 0.98 },
+          html2canvas: {
+            backgroundColor: "#ffffff",
+            logging: false,
+            scale: 2,
+            useCORS: true,
+          },
+          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+          pagebreak: { mode: ["css", "legacy"] },
+        })
+        .from(page)
+        .toPdf();
+      const pdf = await worker.get("pdf");
+      const file = new File([pdf.output("blob")], filename, { type: "application/pdf" });
+      state.preparedContractPdf = {
+        file,
+        rentalId: rental.id,
+        title: `Contrato ${rental.orderNumber || "Planeta Locações"}`,
+      };
+
+      if (shouldUseNativePdfSave()) {
+        if (saveButton) {
+          saveButton.disabled = false;
+        }
+        if (status) {
+          status.textContent = "PDF pronto. Toque em Salvar PDF e escolha Arquivos, WhatsApp ou outro destino.";
+        }
+        return;
+      }
+
+      downloadPreparedPdf();
+      if (status) {
+        status.textContent = "PDF pronto e baixado neste navegador.";
+      }
+    } catch (error) {
+      console.error(error);
+      state.preparedContractPdf = null;
+      if (status) {
+        status.textContent = "Não foi possível gerar o PDF. Tente novamente.";
+      }
+      alert("Não foi possível gerar o PDF do contrato. Tente novamente após a prévia terminar de carregar.");
+    } finally {
+      if (generateButton) {
+        generateButton.disabled = false;
+        generateButton.textContent = "Gerar PDF";
+      }
+    }
+  }
+
+  async function savePreparedContractPdf() {
+    if (!state.preparedContractPdf?.file) {
+      alert("Primeiro toque em Gerar PDF para preparar o arquivo.");
+      return;
+    }
+
+    const status = $("#contractPreviewStatus");
+    const saveButton = $("#savePdfBtn");
+    if (saveButton) {
+      saveButton.disabled = true;
+    }
+
+    try {
+      const { file, title } = state.preparedContractPdf;
+      if (canSharePdfFile(file)) {
+        await navigator.share({ title, files: [file] });
+        if (status) {
+          status.textContent = "PDF compartilhado. Ele pode ser salvo em Arquivos ou enviado pelo destino escolhido.";
+        }
+        showToast("PDF pronto para salvar ou compartilhar.");
+      } else {
+        downloadPreparedPdf();
+        if (status) {
+          status.textContent = "PDF pronto. Verifique os downloads deste navegador.";
+        }
+      }
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        if (status) {
+          status.textContent = "Salvamento cancelado. O PDF continua pronto para uma nova tentativa.";
+        }
+      } else {
+        console.error(error);
+        alert("Não foi possível abrir as opções para salvar o PDF. Tente novamente.");
+      }
+    } finally {
+      if (saveButton) {
+        saveButton.disabled = false;
+      }
+    }
+  }
+
+  function getContractPdfFilename(rental) {
+    const reference = String(rental?.orderNumber || rental?.id || "contrato")
+      .replace(/[^a-zA-Z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    return `contrato-planeta-locacoes-${reference || "locacao"}.pdf`;
+  }
+
+  function shouldUseNativePdfSave() {
+    const isAppleMobile = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const isStandalone = window.matchMedia?.("(display-mode: standalone)").matches || navigator.standalone === true;
+    return isAppleMobile || isStandalone;
+  }
+
+  function canSharePdfFile(file) {
+    try {
+      return typeof navigator.share === "function" &&
+        typeof navigator.canShare === "function" &&
+        navigator.canShare({ files: [file] });
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function downloadPreparedPdf() {
+    const file = state.preparedContractPdf?.file;
+    if (!file) {
+      throw new Error("PDF não preparado.");
+    }
+
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(file);
+    link.href = url;
+    link.download = file.name;
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   }
 
   async function shareReceipt(rental, client) {
@@ -4475,6 +4650,7 @@
 
   function closeModal() {
     state.contractRequestId += 1;
+    state.preparedContractPdf = null;
     $("#modalRoot").innerHTML = "";
     document.body.classList.remove("modal-open");
   }
