@@ -1,14 +1,15 @@
-const CACHE_NAME = "planeta-locacoes-v30";
+const CACHE_NAME = "planeta-locacoes-v32";
 const APP_ASSETS = [
   "./",
   "./index.html",
-  "./index.html?v=30",
-  "./style.css?v=30",
-  "./db.js?v=30",
-  "./app.js?v=30",
-  "./contrato_aluguel_planeta_locacoes_template.html?v=30",
+  "./index.html?v=32",
+  "./style.css?v=32",
+  "./jspdf.umd.min.js?v=32",
+  "./db.js?v=32",
+  "./app.js?v=32",
+  "./contrato_aluguel_planeta_locacoes_template.html?v=32",
   "./manifest.json",
-  "./manifest.json?v=30",
+  "./manifest.json?v=32",
   "./icon.svg",
   "./icon-180.png",
   "./icon-192.png",
@@ -54,7 +55,7 @@ self.addEventListener("fetch", (event) => {
         .catch(() =>
           caches
             .match(event.request)
-            .then((cached) => cached || caches.match("./index.html?v=30") || caches.match("./index.html"))
+            .then((cached) => cached || caches.match("./index.html?v=32") || caches.match("./index.html"))
         )
     );
     return;

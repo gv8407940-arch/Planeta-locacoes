@@ -37,7 +37,7 @@
     "6m": { label: "últimos 6 meses", months: 6 },
     "12m": { label: "últimos 12 meses", months: 12 },
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=30";
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=32";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -62,6 +62,7 @@
     editingRentalId: null,
     deferredInstallPrompt: null,
     contractTemplate: null,
+    preparedContractPdf: null,
     stockViewMode: "detailed",
     dailyPricingEnabled: false,
     dailyPricingRows: [],
@@ -2618,6 +2619,7 @@
     try {
       const client = clientOverride || getClient(rental.clientId);
       const contractHtml = await renderOfficialContractHtml(rental, client);
+      clearPreparedContractPdf();
 
       openModal("Contrato de aluguel", `
         <div class="contract-preview-wrap">
@@ -2625,16 +2627,29 @@
         </div>
         <div class="form-actions no-print">
           <button class="secondary-action" type="button" data-close-modal="true">Fechar</button>
-          <button class="primary-action" type="button" id="printReceiptBtn">Gerar PDF / imprimir</button>
-          <button class="primary-action red" type="button" id="shareReceiptBtn">Compartilhar resumo</button>
+          <button class="primary-action" type="button" id="prepareContractPdfBtn">Preparar PDF</button>
+          <button class="primary-action red" type="button" id="shareContractPdfBtn" disabled>Compartilhar / salvar PDF</button>
+          <button class="secondary-action" type="button" id="shareReceiptBtn">Compartilhar resumo</button>
         </div>
       `);
 
       const frame = $("#contractPreviewFrame");
       frame.srcdoc = contractHtml;
-      // iOS em modo instalado falha com frequencia ao imprimir o conteudo de um iframe.
-      // O contrato e impresso no documento principal, no mesmo gesto do toque.
-      $("#printReceiptBtn").addEventListener("click", () => printOfficialContract(contractHtml));
+      $("#prepareContractPdfBtn").addEventListener("click", () => {
+        try {
+          prepareOfficialContractPdf(rental, client);
+          $("#prepareContractPdfBtn").textContent = "PDF preparado";
+          $("#shareContractPdfBtn").disabled = false;
+          $("#shareContractPdfBtn").textContent = canSharePreparedPdf()
+            ? "Compartilhar / salvar PDF"
+            : "Abrir PDF";
+          showToast("PDF pronto. Toque em Compartilhar / salvar PDF.");
+        } catch (error) {
+          console.error(error);
+          alert("Não foi possível preparar o PDF. Atualize o aplicativo e tente novamente.");
+        }
+      });
+      $("#shareContractPdfBtn").addEventListener("click", sharePreparedContractPdf);
       $("#shareReceiptBtn").addEventListener("click", () => shareReceipt(rental, client));
     } catch (error) {
       console.error(error);
@@ -2786,46 +2801,424 @@
       `;
   }
 
-  function buildContractPrintMarkup(contractHtml) {
-    const documentTemplate = new DOMParser().parseFromString(contractHtml, "text/html");
-    const bodyClasses = documentTemplate.body.className || "";
-    const templateStyles = Array.from(documentTemplate.head.querySelectorAll("style"))
-      .map((style) => style.textContent || "")
-      // O HTML oficial sera inserido dentro da pagina do app. Escopa o body do
-      // template para nao alterar a interface enquanto a tela de impressao existe.
-      .map((css) => css.replace(/\bbody\b/g, ".contract-print-document"))
-      .join("\n");
-
-    return `
-      <style>${templateStyles}</style>
-      <div class="contract-print-document ${escapeAttr(bodyClasses)}">
-        ${documentTemplate.body.innerHTML}
-      </div>
-    `;
+  function clearPreparedContractPdf() {
+    if (state.preparedContractPdf?.url) {
+      URL.revokeObjectURL(state.preparedContractPdf.url);
+    }
+    state.preparedContractPdf = null;
   }
 
-  function printOfficialContract(contractHtml) {
-    document.querySelector("#contractPrintArea")?.remove();
+  function prepareOfficialContractPdf(rental, client) {
+    clearPreparedContractPdf();
 
-    const printRoot = document.createElement("div");
-    printRoot.id = "contractPrintArea";
-    printRoot.className = "print-area contract-print-root";
-    printRoot.innerHTML = buildContractPrintMarkup(contractHtml);
-    document.body.appendChild(printRoot);
+    const document = createOfficialContractPdf(rental, client);
+    const blob = document.output("blob");
+    const orderNumber = String(rental?.orderNumber || "contrato").replace(/[^a-zA-Z0-9_-]+/g, "-");
+    const filename = `contrato-planeta-locacoes-${orderNumber}.pdf`;
+    const file = new File([blob], filename, { type: "application/pdf" });
 
-    // Forca o navegador a calcular o layout A4 antes de abrir a folha de impressao.
-    // Isto evita paginas brancas em WebKit ao imprimir logo apos criar o contrato.
-    void printRoot.getBoundingClientRect();
+    state.preparedContractPdf = {
+      blob,
+      file,
+      filename,
+      url: URL.createObjectURL(blob),
+    };
+  }
 
-    window.addEventListener(
-      "afterprint",
-      () => {
-        printRoot.remove();
-      },
-      { once: true }
-    );
+  function canSharePreparedPdf() {
+    const file = state.preparedContractPdf?.file;
+    return Boolean(file && navigator.canShare?.({ files: [file] }));
+  }
 
-    window.print();
+  function sharePreparedContractPdf() {
+    const prepared = state.preparedContractPdf;
+    if (!prepared) {
+      alert("Prepare o PDF antes de compartilhar.");
+      return;
+    }
+
+    // Esta chamada acontece diretamente no clique do usuario. Assim o PWA do
+    // iPhone preserva o gesto necessario para abrir a folha de compartilhamento.
+    if (canSharePreparedPdf()) {
+      navigator
+        .share({
+          title: prepared.filename.replace(/\.pdf$/i, ""),
+          files: [prepared.file],
+        })
+        .catch((error) => {
+          if (error?.name !== "AbortError") {
+            console.error(error);
+            alert("Não foi possível abrir o compartilhamento do PDF.");
+          }
+        });
+      return;
+    }
+
+    const previewWindow = window.open(prepared.url, "_blank");
+    if (!previewWindow) {
+      window.location.href = prepared.url;
+    }
+  }
+
+  function createOfficialContractPdf(rental, client) {
+    const JsPDF = window.jspdf?.jsPDF;
+    if (!JsPDF) {
+      throw new Error("Biblioteca de PDF não carregada.");
+    }
+
+    const data = buildPdfContractData(rental, client);
+    const layout = getPdfContractLayout(data);
+    const document = new JsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
+      compress: true,
+      putOnlyUsedFonts: true,
+    });
+
+    document.setProperties({
+      title: `Contrato ${data.orderNumber} - Planeta Locações`,
+      subject: "Contrato de aluguel",
+      author: "Planeta Locações",
+    });
+
+    if (layout.twoCopiesPerPage) {
+      drawPdfContractCopy(document, data, {
+        y: 4.5,
+        height: 137.5,
+        copyLabel: "Via 1",
+        scale: layout.scale,
+      });
+      drawPdfCutLine(document, 145);
+      drawPdfContractCopy(document, data, {
+        y: 148.5,
+        height: 137.5,
+        copyLabel: "Via 2",
+        scale: layout.scale,
+      });
+      return document;
+    }
+
+    const itemChunks = splitPdfItems(data.items, 28);
+    const copies = ["Via 1", "Via 2"];
+    let pageIndex = 0;
+    copies.forEach((copyLabel) => {
+      itemChunks.forEach((items, chunkIndex) => {
+        if (pageIndex > 0) {
+          document.addPage();
+        }
+        drawPdfContractCopy(document, { ...data, items }, {
+          y: 5,
+          height: 287,
+          copyLabel: chunkIndex ? `${copyLabel} - continuação` : copyLabel,
+          scale: 1,
+        });
+        pageIndex += 1;
+      });
+    });
+
+    return document;
+  }
+
+  function buildPdfContractData(rental, client) {
+    const totals = getRentalTotals({ ...rental, items: rental.items || [] });
+    const items = buildContractItems(rental).map((item) => ({
+      qty: String(item.quantidade || "-"),
+      name: String(item.descricao || "Item"),
+      unitPrice: String(item.valor_unitario_formatado || formatMoney(item.valor_unitario)),
+      total: String(item.total_formatado || formatMoney(item.total)),
+    }));
+    const notes = String(rental?.notes || "").trim();
+
+    return {
+      orderNumber: String(rental?.orderNumber || "Prévia"),
+      issuedAt: formatDate(todayISO()),
+      clientName: String(client?.name || "Cliente não encontrado"),
+      phone: String(client?.phone || "-"),
+      document: String(client?.document || "-"),
+      address: String(client?.address || "-"),
+      period: `${formatDate(rental?.startDate)} a ${formatDate(rental?.endDate)}`,
+      eventLocation: String(rental?.eventLocation || "-"),
+      items,
+      totals,
+      notes,
+      contentWeight:
+        items.reduce((total, item) => total + item.name.length, 0) +
+        String(client?.name || "").length +
+        String(client?.address || "").length +
+        String(rental?.eventLocation || "").length +
+        notes.length,
+    };
+  }
+
+  function getPdfContractLayout(data) {
+    const itemCount = data.items.length;
+    const contentWeight = data.contentWeight;
+
+    if (itemCount > 12 || contentWeight > 900) {
+      return { twoCopiesPerPage: false, scale: 1 };
+    }
+    if (itemCount > 8 || contentWeight > 680) {
+      return { twoCopiesPerPage: true, scale: 0.76 };
+    }
+    if (itemCount > 4 || contentWeight > 460) {
+      return { twoCopiesPerPage: true, scale: 0.88 };
+    }
+    return { twoCopiesPerPage: true, scale: 1 };
+  }
+
+  function splitPdfItems(items, maximumPerPage) {
+    const list = Array.isArray(items) && items.length ? items : [{ qty: "-", name: "Nenhum item informado", unitPrice: "-", total: "-" }];
+    const chunks = [];
+    for (let index = 0; index < list.length; index += maximumPerPage) {
+      chunks.push(list.slice(index, index + maximumPerPage));
+    }
+    return chunks;
+  }
+
+  function drawPdfContractCopy(document, data, options) {
+    const x = 4.5;
+    const width = 201;
+    const y = options.y;
+    const height = options.height;
+    const scale = options.scale;
+    const unit = (value) => value * scale;
+    const innerX = x + unit(4);
+    const innerWidth = width - unit(8);
+    const bottom = y + height - unit(4);
+
+    document.setLineWidth(0.38);
+    document.setDrawColor(0, 60, 158);
+    document.roundedRect(x, y, width, height, unit(2), unit(2), "S");
+    document.setFillColor(215, 0, 0);
+    document.rect(x, y, width * 0.3, unit(3), "F");
+    document.setFillColor(0, 60, 166);
+    document.rect(x + width * 0.3, y, width * 0.7, unit(3), "F");
+
+    let cursor = y + unit(9);
+    setPdfFont(document, unit(13.5), "bold", [0, 60, 166]);
+    document.text("Planeta", innerX, cursor);
+    const planetWidth = document.getTextWidth("Planeta");
+    setPdfFont(document, unit(13.5), "bold", [215, 0, 0]);
+    document.text("Locações", innerX + planetWidth + unit(5), cursor);
+    setPdfFont(document, unit(5.8), "normal", [50, 50, 50]);
+    document.text("Eventos do seu jeito | Uma marca da Planeta Móveis", innerX, cursor + unit(3.4));
+
+    const titleWidth = unit(62);
+    const titleHeight = unit(10.5);
+    const titleX = x + width - unit(4) - titleWidth;
+    const titleY = y + unit(4);
+    document.setFillColor(0, 60, 166);
+    document.roundedRect(titleX, titleY, titleWidth, titleHeight, 0, 0, "F");
+    setPdfFont(document, unit(9.6), "bold", [255, 255, 255]);
+    document.text("CONTRATO DE ALUGUEL", titleX + titleWidth / 2, titleY + unit(4.2), { align: "center" });
+    setPdfFont(document, unit(5.8), "normal", [20, 20, 20]);
+    document.text(`${options.copyLabel} - Nº ${data.orderNumber}   Data: ${data.issuedAt}`, titleX + titleWidth, titleY + titleHeight + unit(3), { align: "right" });
+
+    cursor = y + unit(19);
+    document.setDrawColor(184, 197, 230);
+    document.setFillColor(255, 255, 255);
+    document.rect(innerX, cursor, innerWidth, unit(4.5), "FD");
+    setPdfFont(document, unit(5.2), "normal", [30, 30, 30]);
+    document.text("Av. Fernando Costa nº 44 - V. Jaiara - Anápolis-GO", innerX + unit(1.3), cursor + unit(2.9));
+    document.text("Gabriel: (62) 99935-1052 | @planeta_locacoes_anapolis", innerX + innerWidth - unit(1.3), cursor + unit(2.9), { align: "right" });
+    cursor += unit(6);
+
+    cursor = drawPdfFieldBox(document, "DADOS DO LOCATÁRIO", [
+      [
+        { label: "Nome", value: data.clientName, fraction: 0.62 },
+        { label: "Telefone", value: data.phone, fraction: 0.38 },
+      ],
+      [{ label: "CPF/CNPJ", value: data.document, fraction: 1 }],
+      [{ label: "Endereço", value: data.address, fraction: 1 }],
+    ], innerX, cursor, innerWidth, unit, bottom);
+
+    cursor = drawPdfFieldBox(document, "DADOS DO ALUGUEL", [
+      [
+        { label: "Data/período", value: data.period, fraction: 0.62 },
+        { label: "Horário", value: "", fraction: 0.38 },
+      ],
+      [{ label: "Local de entrega/evento", value: data.eventLocation, fraction: 1 }],
+    ], innerX, cursor, innerWidth, unit, bottom);
+
+    cursor = drawPdfSectionTitle(document, "ITENS ALUGADOS", innerX, cursor, innerWidth, unit);
+    cursor = drawPdfItemsTable(document, data.items, innerX, cursor, innerWidth, unit, bottom);
+    cursor = drawPdfTotals(document, data.totals, innerX, cursor + unit(1.2), innerWidth, unit);
+    cursor = drawPdfPayment(document, innerX, cursor, innerWidth, unit);
+
+    const terms = [
+      "Condições: Os itens devem ser devolvidos nas mesmas condições de entrega. Danos, perdas, extravios e atraso na devolução são de responsabilidade do locatário.",
+      "O sinal confirma a reserva e o restante deve ser quitado conforme combinado.",
+      data.notes ? `Observações: ${data.notes}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    cursor = drawPdfTerms(document, terms, innerX, cursor + unit(1.1), innerWidth, unit);
+
+    const signatureY = Math.min(Math.max(cursor + unit(7), y + height - unit(13)), bottom - unit(4));
+    drawPdfSignatures(document, innerX, signatureY, innerWidth, unit);
+  }
+
+  function drawPdfSectionTitle(document, title, x, y, width, unit) {
+    const height = unit(4);
+    document.setFillColor(0, 60, 166);
+    document.rect(x, y, width, height, "F");
+    setPdfFont(document, unit(6.7), "bold", [255, 255, 255]);
+    document.text(title, x + unit(1.3), y + unit(2.75));
+    return y + height;
+  }
+
+  function drawPdfFieldBox(document, title, rows, x, y, width, unit) {
+    let cursor = drawPdfSectionTitle(document, title, x, y, width, unit);
+    const fontSize = unit(5.7);
+    rows.forEach((cells) => {
+      const cellWidths = cells.map((cell, index) => {
+        if (index === cells.length - 1) {
+          const usedWidth = cells
+            .slice(0, index)
+            .reduce((sum, previous) => sum + width * Number(previous.fraction || 0), 0);
+          return { ...cell, width: width - usedWidth };
+        }
+        return { ...cell, width: width * cell.fraction };
+      });
+      const preparedCells = cellWidths.map((cell) => {
+        const content = `${cell.label}: ${pdfText(cell.value)}`;
+        const lines = document.splitTextToSize(content, Math.max(unit(12), cell.width - unit(2.4)));
+        return { ...cell, lines };
+      });
+      const rowHeight = Math.max(unit(4.4), ...preparedCells.map((cell) => unit(1.7) + cell.lines.length * fontSize * 0.37));
+      let cellX = x;
+      preparedCells.forEach((cell) => {
+        document.setDrawColor(198, 208, 233);
+        document.rect(cellX, cursor, cell.width, rowHeight, "S");
+        setPdfFont(document, fontSize, "normal", [20, 20, 20]);
+        document.text(cell.lines, cellX + unit(1.2), cursor + unit(2.5), { lineHeightFactor: 1.05 });
+        cellX += cell.width;
+      });
+      cursor += rowHeight;
+    });
+    return cursor + unit(1.1);
+  }
+
+  function drawPdfItemsTable(document, items, x, y, width, unit) {
+    const quantityWidth = unit(14);
+    const unitWidth = unit(29);
+    const totalWidth = unit(32);
+    const descriptionWidth = width - quantityWidth - unitWidth - totalWidth;
+    const columns = [quantityWidth, descriptionWidth, unitWidth, totalWidth];
+    const headerHeight = unit(4.4);
+    const headers = ["Qtd.", "Descrição dos itens", "Vlr. unit.", "Total"];
+    let cursor = y;
+    let cellX = x;
+
+    headers.forEach((header, index) => {
+      document.setFillColor(238, 244, 255);
+      document.setDrawColor(184, 197, 230);
+      document.rect(cellX, cursor, columns[index], headerHeight, "FD");
+      setPdfFont(document, unit(6.1), "bold", [0, 45, 143]);
+      document.text(header, cellX + columns[index] / 2, cursor + unit(2.8), { align: "center" });
+      cellX += columns[index];
+    });
+    cursor += headerHeight;
+
+    const rowFontSize = unit(5.9);
+    const safeItems = Array.isArray(items) && items.length ? items : [{ qty: "-", name: "Nenhum item informado", unitPrice: "-", total: "-" }];
+    safeItems.forEach((item) => {
+      const descriptionLines = document.splitTextToSize(pdfText(item.name), Math.max(unit(22), descriptionWidth - unit(2.4)));
+      const rowHeight = Math.max(unit(4.4), unit(1.6) + descriptionLines.length * rowFontSize * 0.37);
+      const values = [pdfText(item.qty), descriptionLines, pdfText(item.unitPrice), pdfText(item.total)];
+      cellX = x;
+      values.forEach((value, index) => {
+        document.setDrawColor(184, 197, 230);
+        document.rect(cellX, cursor, columns[index], rowHeight, "S");
+        setPdfFont(document, rowFontSize, "normal", [20, 20, 20]);
+        const textX = index === 1 ? cellX + unit(1.2) : cellX + columns[index] / 2;
+        const align = index === 1 ? "left" : "center";
+        document.text(value, textX, cursor + unit(2.65), { align, lineHeightFactor: 1.05 });
+        cellX += columns[index];
+      });
+      cursor += rowHeight;
+    });
+    return cursor;
+  }
+
+  function drawPdfTotals(document, totals, x, y, width, unit) {
+    const lines = [
+      `Subtotal: ${formatMoney(totals.subtotal)}`,
+      `Desconto: ${formatMoney(totals.discount)}`,
+      `Frete: ${formatMoney(totals.freight)}`,
+      `Total final: ${formatMoney(totals.total)}`,
+      `Sinal: ${formatMoney(totals.deposit)}`,
+      `Restante: ${formatMoney(totals.remaining)}`,
+    ];
+    const lineHeight = unit(3.6);
+    const height = lineHeight * 2 + unit(1.4);
+    document.setDrawColor(184, 197, 230);
+    document.rect(x, y, width, height, "S");
+    lines.forEach((line, index) => {
+      const column = index % 3;
+      const row = Math.floor(index / 3);
+      setPdfFont(document, unit(5.8), index === 3 ? "bold" : "normal", index === 3 ? [0, 45, 143] : [20, 20, 20]);
+      document.text(line, x + unit(1.2) + (width / 3) * column, y + unit(2.6) + lineHeight * row);
+    });
+    return y + height;
+  }
+
+  function drawPdfPayment(document, x, y, width, unit) {
+    const height = unit(4.1);
+    document.setFillColor(247, 251, 255);
+    document.setDrawColor(184, 197, 230);
+    document.rect(x, y, width, height, "FD");
+    setPdfFont(document, unit(5.8), "normal", [20, 20, 20]);
+    document.text(`Pix: ${CONTRACT_PIX}`, x + unit(1.2), y + unit(2.6));
+    document.text(`Titular: ${CONTRACT_PIX_HOLDER}`, x + width - unit(1.2), y + unit(2.6), { align: "right" });
+    return y + height;
+  }
+
+  function drawPdfTerms(document, text, x, y, width, unit) {
+    const fontSize = unit(5.2);
+    const lines = document.splitTextToSize(pdfText(text), width - unit(2.4));
+    const height = Math.max(unit(6.4), unit(1.8) + lines.length * fontSize * 0.37);
+    document.setFillColor(255, 243, 243);
+    document.setDrawColor(255, 195, 195);
+    document.rect(x, y, width, height, "FD");
+    setPdfFont(document, fontSize, "normal", [180, 0, 0]);
+    document.text(lines, x + unit(1.2), y + unit(2.5), { lineHeightFactor: 1.05 });
+    return y + height;
+  }
+
+  function drawPdfSignatures(document, x, y, width, unit) {
+    const signatureWidth = width * 0.42;
+    const leftX = x + width * 0.04;
+    const rightX = x + width - width * 0.04 - signatureWidth;
+    document.setDrawColor(0, 60, 166);
+    document.setLineWidth(0.42);
+    document.line(leftX, y, leftX + signatureWidth, y);
+    document.line(rightX, y, rightX + signatureWidth, y);
+    setPdfFont(document, unit(5.7), "normal", [20, 20, 20]);
+    document.text("Assinatura do locador", leftX + signatureWidth / 2, y + unit(2.7), { align: "center" });
+    document.text("Assinatura do locatário", rightX + signatureWidth / 2, y + unit(2.7), { align: "center" });
+  }
+
+  function drawPdfCutLine(document, y) {
+    document.setDrawColor(130, 130, 130);
+    document.setLineDashPattern([1.2, 1.2], 0);
+    document.line(4.5, y, 205.5, y);
+    document.setLineDashPattern([], 0);
+    document.setFillColor(255, 255, 255);
+    document.rect(94, y - 1.8, 22, 3.6, "F");
+    setPdfFont(document, 6.2, "normal", [100, 100, 100]);
+    document.text("corte aqui", 105, y + 0.9, { align: "center" });
+  }
+
+  function setPdfFont(document, size, style, color) {
+    document.setFont("helvetica", style);
+    document.setFontSize(size);
+    document.setTextColor(...color);
+  }
+
+  function pdfText(value) {
+    return String(value ?? "-").replace(/\s+/g, " ").trim() || "-";
   }
 
   async function shareReceipt(rental, client) {
