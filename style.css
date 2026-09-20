@@ -1207,6 +1207,18 @@ textarea:focus {
   border-radius: 8px;
 }
 
+.contract-loading {
+  display: grid;
+  gap: 6px;
+  min-height: 128px;
+  align-content: center;
+  text-align: center;
+}
+
+.contract-loading span {
+  color: var(--muted);
+}
+
 .contract-frame {
   display: block;
   width: 100%;

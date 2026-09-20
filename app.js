@@ -37,7 +37,7 @@
     "6m": { label: "últimos 6 meses", months: 6 },
     "12m": { label: "últimos 12 meses", months: 12 },
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=32";
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=33";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -63,6 +63,7 @@
     editingRentalId: null,
     deferredInstallPrompt: null,
     contractTemplate: null,
+    contractRequestId: 0,
     stockViewMode: "detailed",
     dailyPricingEnabled: false,
     dailyPricingRows: [],
@@ -1703,7 +1704,8 @@
         return;
       }
 
-      await handleRentalAction(button.dataset.action, rental, true);
+      const currentRental = getRental(Number(button.dataset.id)) || rental;
+      await handleRentalAction(button.dataset.action, currentRental, true);
     });
   }
 
@@ -2033,7 +2035,7 @@
       }
       loadRentalIntoForm(rental);
     } else if (action === "receipt-rental") {
-      openReceiptModal(rental);
+      await openReceiptModal(rental);
     } else if (action === "mark-delivered") {
       await markDelivered(rental);
       if (fromModal) {
@@ -2859,9 +2861,8 @@
     });
   }
 
-  function openReceiptModal(rental, clientOverride = null) {
-    void openOfficialContractModal(rental, clientOverride);
-    return;
+  async function openReceiptModal(rental, clientOverride = null) {
+    return openOfficialContractModal(rental, clientOverride);
 
     const client = clientOverride || getClient(rental.clientId);
     const totals = getRentalTotals(rental);
@@ -2963,29 +2964,100 @@
     $("#shareReceiptBtn").addEventListener("click", () => shareReceipt(rental, client));
   }
 
-  async function openOfficialContractModal(rental, clientOverride = null) {
+  function resolveContractContext(rentalReference, clientOverride = null) {
+    const referenceId = Number(rentalReference?.id || rentalReference);
+    const savedRental = referenceId ? getRental(referenceId) : null;
+    const rental = savedRental || (typeof rentalReference === "object" ? rentalReference : null);
+
+    if (!rental) {
+      return { error: "A locação selecionada não foi encontrada. Atualize a lista e tente novamente." };
+    }
+    if (!rental.startDate || !rental.endDate) {
+      return { error: "Esta locação não possui as datas de início e fim necessárias para o contrato." };
+    }
+    if (!Array.isArray(rental.items) || !rental.items.length) {
+      return { error: "Esta locação não possui itens salvos para incluir no contrato." };
+    }
+
+    const items = rental.items.map((line, index) => {
+      const stockItem = getItem(line.itemId);
+      return {
+        ...line,
+        name: line.name || stockItem?.name || "",
+        index,
+      };
+    });
+    const missingItem = items.find((line) => !line.name);
+    if (missingItem) {
+      return { error: `O item ${missingItem.index + 1} desta locação não possui um nome salvo. Edite a locação antes de gerar o contrato.` };
+    }
+
+    const client = clientOverride || getClient(rental.clientId);
+    if (!client) {
+      return { error: "O cliente vinculado a esta locação não foi encontrado. Verifique o cadastro do cliente antes de gerar o contrato." };
+    }
+
+    return {
+      rental: { ...rental, items },
+      client,
+    };
+  }
+
+  async function openOfficialContractModal(rentalReference, clientOverride = null) {
+    const context = resolveContractContext(rentalReference, clientOverride);
+    if (context.error) {
+      alert(`Não foi possível gerar o contrato. ${context.error}`);
+      return false;
+    }
+
+    const requestId = ++state.contractRequestId;
+    openModal("Preparando contrato", `
+      <div class="contract-loading" role="status" aria-live="polite">
+        <strong>Preparando a prévia do contrato...</strong>
+        <span>Os dados da locação estão sendo carregados.</span>
+      </div>
+    `);
+
     try {
-      const client = clientOverride || getClient(rental.clientId);
-      const contractHtml = await renderOfficialContractHtml(rental, client);
+      const contractHtml = await renderOfficialContractHtml(context.rental, context.client);
+      if (requestId !== state.contractRequestId) {
+        return false;
+      }
 
       openModal("Contrato de aluguel", `
         <div class="contract-preview-wrap">
           <iframe id="contractPreviewFrame" class="contract-frame" title="Prévia do contrato de aluguel"></iframe>
         </div>
+        <p id="contractPreviewStatus" class="muted-text" role="status" aria-live="polite">Carregando a prévia...</p>
         <div class="form-actions no-print">
           <button class="secondary-action" type="button" data-close-modal="true">Fechar</button>
-          <button class="primary-action" type="button" id="printReceiptBtn">Gerar PDF / imprimir</button>
+          <button class="primary-action" type="button" id="printReceiptBtn" disabled>Gerar PDF / imprimir</button>
           <button class="primary-action red" type="button" id="shareReceiptBtn">Compartilhar resumo</button>
         </div>
       `);
 
       const frame = $("#contractPreviewFrame");
+      frame.addEventListener("load", () => {
+        const printButton = $("#printReceiptBtn");
+        const status = $("#contractPreviewStatus");
+        if (printButton) {
+          printButton.disabled = false;
+        }
+        if (status) {
+          status.textContent = "Prévia pronta. Toque em Gerar PDF / imprimir para salvar ou imprimir o contrato.";
+        }
+      }, { once: true });
       frame.srcdoc = contractHtml;
       $("#printReceiptBtn").addEventListener("click", () => printContractFrame(frame));
-      $("#shareReceiptBtn").addEventListener("click", () => shareReceipt(rental, client));
+      $("#shareReceiptBtn").addEventListener("click", () => shareReceipt(context.rental, context.client));
+      return true;
     } catch (error) {
       console.error(error);
-      alert("Não foi possível gerar o contrato. Verifique se o template oficial está no projeto.");
+      if (requestId === state.contractRequestId) {
+        const detail = error?.message ? ` ${error.message}` : "";
+        alert(`Não foi possível gerar o contrato.${detail}`);
+      }
+      return false;
     }
   }
 
@@ -3135,13 +3207,23 @@
   }
 
   function printContractFrame(frame) {
-    if (!frame?.contentWindow) {
+    if (!frame?.contentWindow || !frame?.contentDocument) {
       alert("A prévia do contrato ainda não carregou. Tente novamente em alguns segundos.");
       return;
     }
 
-    frame.contentWindow.focus();
-    frame.contentWindow.print();
+    if (frame.contentDocument.readyState !== "complete") {
+      alert("A prévia do contrato ainda está carregando. Aguarde um instante e tente novamente.");
+      return;
+    }
+
+    try {
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+    } catch (error) {
+      console.error(error);
+      alert("Não foi possível abrir a impressão. Tente novamente após a prévia terminar de carregar.");
+    }
   }
 
   async function shareReceipt(rental, client) {
@@ -4392,6 +4474,7 @@
   }
 
   function closeModal() {
+    state.contractRequestId += 1;
     $("#modalRoot").innerHTML = "";
     document.body.classList.remove("modal-open");
   }
