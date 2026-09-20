@@ -5,9 +5,9 @@ const path = require("path");
 const { exec } = require("child_process");
 
 const HOST = process.env.HOST || "0.0.0.0";
-const PORT = Number(process.env.PORT) || 8765;
+const PORT = 8765;
 const ROOT = __dirname;
-const LOCAL_URL = `http://127.0.0.1:${PORT}/index.html?v=34`;
+const LOCAL_URL = `http://127.0.0.1:${PORT}/index.html?v=28`;
 
 const CONTENT_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -22,7 +22,7 @@ function getNetworkUrls() {
   return Object.values(os.networkInterfaces())
     .flat()
     .filter((details) => details && details.family === "IPv4" && !details.internal)
-    .map((details) => `http://${details.address}:${PORT}/index.html?v=34`);
+    .map((details) => `http://${details.address}:${PORT}/index.html?v=28`);
 }
 
 function sendFile(response, filePath) {

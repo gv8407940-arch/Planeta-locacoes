@@ -10,13 +10,13 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="format-detection" content="telephone=no">
   <title>Planeta Locações</title>
-  <link rel="manifest" href="manifest.json?v=34">
+  <link rel="manifest" href="manifest.json?v=28">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
-  <link rel="stylesheet" href="style.css?v=34">
+  <link rel="stylesheet" href="style.css?v=28">
 </head>
 <body>
   <div class="app-shell">
@@ -196,8 +196,8 @@
               </label>
 
               <label>
-                CPF ou CNPJ
-                <input id="rentalClientDocument" type="text" required inputmode="numeric" autocomplete="off" maxlength="18" placeholder="000.000.000-00 ou 00.000.000/0000-00">
+                CPF
+                <input id="rentalClientCpf" type="text" required inputmode="numeric" autocomplete="off" placeholder="000.000.000-00">
               </label>
 
               <label>
@@ -210,7 +210,7 @@
                 <input id="rentalClientAddress" type="text" placeholder="Opcional">
               </label>
 
-              <p id="clientMatchInfo" class="form-feedback wide" role="status" aria-live="polite"></p>
+              <p id="clientMatchInfo" class="muted-text wide"></p>
             </div>
           </section>
 
@@ -287,17 +287,17 @@
           <div class="form-grid">
             <label>
               Desconto
-              <input id="rentalDiscount" type="text" inputmode="decimal" autocomplete="off" value="0">
+              <input id="rentalDiscount" type="number" inputmode="decimal" min="0" step="0.01" value="0">
             </label>
 
             <label>
               Frete
-              <input id="rentalFreight" type="text" inputmode="decimal" autocomplete="off" value="0">
+              <input id="rentalFreight" type="number" inputmode="decimal" min="0" step="0.01" value="0">
             </label>
 
             <label>
               Sinal
-              <input id="rentalDeposit" type="text" inputmode="decimal" autocomplete="off" value="0">
+              <input id="rentalDeposit" type="number" inputmode="decimal" min="0" step="0.01" value="0">
             </label>
 
             <label>
@@ -592,8 +592,7 @@
   <div id="modalRoot"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="db.js?v=34"></script>
-  <script src="html2pdf.bundle.min.js?v=34"></script>
-  <script src="app.js?v=34"></script>
+  <script src="db.js?v=28"></script>
+  <script src="app.js?v=28"></script>
 </body>
 </html>

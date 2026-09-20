@@ -37,7 +37,7 @@
     "6m": { label: "últimos 6 meses", months: 6 },
     "12m": { label: "últimos 12 meses", months: 12 },
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=34";
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=28";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -58,13 +58,10 @@
     rentals: [],
     expenses: [],
     kits: [],
-    itemOccurrences: [],
     currentRentalItems: [],
     editingRentalId: null,
     deferredInstallPrompt: null,
     contractTemplate: null,
-    contractRequestId: 0,
-    preparedContractPdf: null,
     stockViewMode: "detailed",
     dailyPricingEnabled: false,
     dailyPricingRows: [],
@@ -184,20 +181,21 @@
     $("#addRentalItemBtn").addEventListener("click", addCurrentRentalItem);
     $("#addRentalKitBtn").addEventListener("click", addCurrentRentalKit);
     $("#rentalItemsEditor").addEventListener("input", handleRentalLineInput);
-    $("#rentalItemsEditor").addEventListener("blur", handleRentalLineBlur, true);
     $("#rentalItemsEditor").addEventListener("click", handleRentalLineClick);
     $("#rentalDailyPricingToggle").addEventListener("change", handleDailyPricingToggle);
     $("#dailyPricingEditor").addEventListener("input", handleDailyPricingInput);
-    $("#dailyPricingEditor").addEventListener("blur", handleDailyPricingBlur, true);
     $("#dailyPricingEditor").addEventListener("change", handleDailyPricingInput);
     $("#dailyPricingEditor").addEventListener("click", handleDailyPricingClick);
-    bindMoneyInput($("#rentalDiscount"), renderRentalTotals);
-    bindMoneyInput($("#rentalFreight"), renderRentalTotals);
-    bindMoneyInput($("#rentalDeposit"), renderRentalTotals);
+    $("#rentalDiscount").addEventListener("input", renderRentalTotals);
+    $("#rentalFreight").addEventListener("input", renderRentalTotals);
+    $("#rentalDeposit").addEventListener("input", renderRentalTotals);
     $("#rentalStartDate").addEventListener("change", handleRentalDateChange);
     $("#rentalEndDate").addEventListener("change", handleRentalDateChange);
-    $("#rentalClientDocument").addEventListener("blur", handleRentalDocumentLookup);
-    $("#rentalClientDocument").addEventListener("input", handleRentalDocumentInput);
+    $("#rentalClientCpf").addEventListener("blur", handleRentalCpfLookup);
+    $("#rentalClientCpf").addEventListener("input", () => {
+      $("#rentalClientId").value = "";
+      $("#clientMatchInfo").textContent = "";
+    });
 
     $("#exportBackupBtn").addEventListener("click", exportBackup);
     $("#importBackupInput").addEventListener("change", importBackup);
@@ -214,13 +212,12 @@
   }
 
   async function loadAll() {
-    const [items, clients, rentals, expenses, kits, itemOccurrences] = await Promise.all([
+    const [items, clients, rentals, expenses, kits] = await Promise.all([
       PlanetaDB.getAll("items"),
       PlanetaDB.getAll("clients"),
       PlanetaDB.getAll("rentals"),
       PlanetaDB.getAll("expenses"),
       PlanetaDB.getAll("kits"),
-      PlanetaDB.getAll("itemOccurrences"),
     ]);
 
     state.items = items.sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
@@ -228,7 +225,6 @@
     state.rentals = rentals.sort((a, b) => Number(b.orderNumber) - Number(a.orderNumber));
     state.expenses = expenses.map(normalizeStoredExpense).sort((a, b) => String(getExpenseDate(b)).localeCompare(String(getExpenseDate(a))));
     state.kits = kits.sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
-    state.itemOccurrences = itemOccurrences.sort((a, b) => String(b.occurredAt || "").localeCompare(String(a.occurredAt || "")));
   }
 
   async function loadPreferences() {
@@ -709,13 +705,13 @@
         <div class="metric-grid">
           <div class="metric"><span>Total</span><strong>${stats.total}</strong></div>
           <div class="metric"><span>Disponível no período</span><strong>${periodStats.available}</strong></div>
-          <div class="metric"><span>Alugado</span><strong>${stats.rentedActive}</strong></div>
-          <div class="metric"><span>Em manutenção</span><strong>${stats.maintenance}</strong></div>
-          <div class="metric"><span>Quebrado/perdido</span><strong>${stats.brokenLost}</strong></div>
+          <div class="metric"><span>Ocupado no período</span><strong>${periodStats.occupied}</strong></div>
           <div class="metric"><span>Reservado no período</span><strong>${periodStats.reserved}</strong></div>
+          <div class="metric"><span>Entregue/alugado</span><strong>${periodStats.delivered}</strong></div>
           <div class="metric"><span>Reservado futuro</span><strong>${stats.futureReserved}</strong></div>
           <div class="metric"><span>Próxima reserva</span><strong>${stats.nextReservationDate ? formatDate(stats.nextReservationDate) : "-"}</strong></div>
-          ${stats.unavailable ? `<div class="metric"><span>Indisponível manual</span><strong>${stats.unavailable}</strong></div>` : ""}
+          <div class="metric"><span>Devolvido</span><strong>${stats.returned}</strong></div>
+          <div class="metric"><span>Indisponível</span><strong>${stats.unavailable}</strong></div>
         </div>
         ${conflictText ? `<p class="muted-text"><strong>Uso no período:</strong><br>${conflictText}</p>` : `<p class="muted-text">Nenhuma locação ocupando este item no período consultado.</p>`}
         <p class="muted-text">Valor padrão: <strong>${formatMoney(item.defaultPrice || 0)}</strong></p>
@@ -801,7 +797,7 @@
           <span class="badge">${rentals.length} locação${rentals.length === 1 ? "" : "es"}</span>
         </div>
         <p class="muted-text">
-          ${client.document ? `${getDocumentLabel(client.document)}: ${escapeHtml(formatDocument(client.document))}<br>` : ""}
+          ${client.document ? `Documento: ${escapeHtml(client.document)}<br>` : ""}
           ${client.address ? `Endereço: ${escapeHtml(client.address)}<br>` : ""}
           ${client.notes ? `Obs.: ${escapeHtml(client.notes)}` : ""}
         </p>
@@ -832,7 +828,7 @@
     $("#rentalClientId").value = "";
     $("#newRentalTitle").textContent = "Nova locação";
     $("#rentalForm").reset();
-    setDocumentFeedback($("#clientMatchInfo"));
+    $("#clientMatchInfo").textContent = "";
     $("#rentalOrderDate").value = todayISO();
     $("#rentalStartDate").value = todayISO();
     $("#rentalEndDate").value = todayISO();
@@ -866,7 +862,7 @@
         itemId: item.id,
         name: item.name,
         qty,
-        unitPrice: toNumber(item.defaultPrice),
+        unitPrice: Number(item.defaultPrice) || 0,
       });
     }
 
@@ -910,7 +906,7 @@
           itemId: item.id,
           name: item.name,
           qty: generatedQty,
-          unitPrice: toNumber(item.defaultPrice),
+          unitPrice: Number(item.defaultPrice) || 0,
           originType: "kit",
           originName: kit.name,
           originKitId: kit.id,
@@ -967,7 +963,7 @@
               </label>
               <label>
                 Valor unit.
-                <input type="text" inputmode="decimal" autocomplete="off" value="${escapeAttr(formatMoneyInput(line.unitPrice))}" data-line-field="unitPrice" data-index="${index}">
+                <input type="number" min="0" step="0.01" inputmode="decimal" value="${line.unitPrice}" data-line-field="unitPrice" data-index="${index}">
               </label>
             </div>
             <div class="mini-actions">
@@ -1008,30 +1004,11 @@
       return;
     }
 
-    if (field === "qty") {
-      state.currentRentalItems[index][field] = Math.max(1, toNumber(event.target.value));
-    } else {
-      const parsed = updateMoneyFieldValidity(event.target);
-      if (parsed.valid) {
-        state.currentRentalItems[index][field] = parsed.value;
-      }
-    }
+    const value = field === "qty" ? Math.max(1, toNumber(event.target.value)) : Math.max(0, toNumber(event.target.value));
+    state.currentRentalItems[index][field] = value;
     syncDailyPricingRows();
     renderDailyPricingEditor();
     renderRentalTotals();
-  }
-
-  function handleRentalLineBlur(event) {
-    if (event.target.dataset.lineField !== "unitPrice") {
-      return;
-    }
-
-    const parsed = updateMoneyFieldValidity(event.target, true);
-    const index = Number(event.target.dataset.index);
-    if (parsed.valid && parsed.complete && state.currentRentalItems[index]) {
-      state.currentRentalItems[index].unitPrice = parsed.value;
-      renderRentalTotals();
-    }
   }
 
   function handleRentalLineClick(event) {
@@ -1106,7 +1083,7 @@
                     </label>
                     <label>
                       Valor por ${escapeHtml(row.unitLabel || "unidade")}
-                      <input type="text" inputmode="decimal" autocomplete="off" value="${escapeAttr(formatMoneyInput(day.unitPrice))}" data-daily-field="unitPrice" data-row-index="${rowIndex}" data-day-index="${dayIndex}">
+                      <input type="number" min="0" step="0.01" inputmode="decimal" value="${escapeAttr(day.unitPrice)}" data-daily-field="unitPrice" data-row-index="${rowIndex}" data-day-index="${dayIndex}">
                     </label>
                     <div class="daily-day-foot">
                       <span>${formatMoney(dayTotal)}</span>
@@ -1146,27 +1123,10 @@
       day.charge = event.target.checked;
       renderDailyPricingEditor();
     } else if (field === "unitPrice") {
-      const parsed = updateMoneyFieldValidity(event.target);
-      if (parsed.valid) {
-        day.unitPrice = parsed.value;
-      }
+      day.unitPrice = Math.max(0, toNumber(event.target.value));
     }
 
     renderRentalTotals();
-  }
-
-  function handleDailyPricingBlur(event) {
-    if (event.target.dataset.dailyField !== "unitPrice") {
-      return;
-    }
-
-    const parsed = updateMoneyFieldValidity(event.target, true);
-    const row = state.dailyPricingRows[Number(event.target.dataset.rowIndex)];
-    const day = row?.days?.[Number(event.target.dataset.dayIndex)];
-    if (parsed.valid && parsed.complete && day) {
-      day.unitPrice = parsed.value;
-      renderRentalTotals();
-    }
   }
 
   function handleDailyPricingClick(event) {
@@ -1398,10 +1358,10 @@
 
   function buildRentalFromForm(statusOverride) {
     const clientName = $("#rentalClientName").value.trim();
-    const clientDocument = $("#rentalClientDocument").value.trim();
+    const clientCpf = $("#rentalClientCpf").value.trim();
     const clientPhone = $("#rentalClientPhone").value.trim();
     const clientAddress = $("#rentalClientAddress").value.trim();
-    const documentValidation = validateDocument(clientDocument);
+    const cpfDigits = onlyDigits(clientCpf);
     const orderDate = $("#rentalOrderDate").value;
     const startDate = $("#rentalStartDate").value;
     const endDate = $("#rentalEndDate").value;
@@ -1412,28 +1372,17 @@
       return null;
     }
 
-    if (!documentValidation.valid) {
-      setDocumentFeedback($("#clientMatchInfo"), documentValidation.message, "error");
-      $("#rentalClientDocument").focus();
-      alert(`${documentValidation.message} Corrija o documento para continuar a locação.`);
+    if (!isValidCpf(clientCpf)) {
+      $("#clientMatchInfo").textContent = "CPF inválido. Confira os 11 dígitos antes de salvar a locação.";
+      $("#rentalClientCpf").focus();
+      alert("Informe um CPF válido para continuar a locação. O CPF precisa ter 11 dígitos e dígitos verificadores corretos.");
       return null;
     }
 
-    $("#rentalClientDocument").value = formatDocument(documentValidation.digits);
+    $("#rentalClientCpf").value = formatCpf(cpfDigits);
 
     if (!orderDate || !startDate || !endDate || endDate < startDate) {
       alert("Informe as datas do pedido, retirada/entrega e devolução corretamente.");
-      return null;
-    }
-
-    const rentalMoneyFields = [
-      ...$$("[data-line-field='unitPrice']", $("#rentalItemsEditor")).map((input, index) => ({ input, label: `Valor unitário do item ${index + 1}` })),
-      ...$$("[data-daily-field='unitPrice']", $("#dailyPricingEditor")).map((input) => ({ input, label: "Valor da diária" })),
-      { input: $("#rentalDiscount"), label: "Desconto" },
-      { input: $("#rentalFreight"), label: "Frete" },
-      { input: $("#rentalDeposit"), label: "Sinal" },
-    ];
-    if (!validateMoneyFields(rentalMoneyFields)) {
       return null;
     }
 
@@ -1487,7 +1436,7 @@
       clientDraft: {
         name: clientName,
         phone: clientPhone,
-        document: formatDocument(documentValidation.digits),
+        document: formatCpf(cpfDigits),
         address: clientAddress,
       },
       orderDate,
@@ -1651,7 +1600,7 @@
           <h4>Dados do cliente</h4>
           <div class="detail-grid">
             <div class="metric"><span>Nome</span><strong>${escapeHtml(client?.name || "-")}</strong></div>
-            <div class="metric"><span>${getDocumentLabel(client?.document)}</span><strong>${escapeHtml(client?.document ? formatDocument(client.document) : "-")}</strong></div>
+            <div class="metric"><span>CPF/CNPJ</span><strong>${escapeHtml(client?.document || "-")}</strong></div>
             <div class="metric"><span>Telefone</span><strong>${escapeHtml(client?.phone || "-")}</strong></div>
             <div class="metric"><span>Endereco</span><strong>${escapeHtml(client?.address || "-")}</strong></div>
           </div>
@@ -1705,8 +1654,7 @@
         return;
       }
 
-      const currentRental = getRental(Number(button.dataset.id)) || rental;
-      await handleRentalAction(button.dataset.action, currentRental, true);
+      await handleRentalAction(button.dataset.action, rental, true);
     });
   }
 
@@ -2036,7 +1984,7 @@
       }
       loadRentalIntoForm(rental);
     } else if (action === "receipt-rental") {
-      await openReceiptModal(rental);
+      openReceiptModal(rental);
     } else if (action === "mark-delivered") {
       await markDelivered(rental);
       if (fromModal) {
@@ -2084,17 +2032,17 @@
     $("#rentalId").value = rental.id;
     $("#rentalClientId").value = rental.clientId || "";
     $("#rentalClientName").value = client?.name || "";
-    $("#rentalClientDocument").value = formatDocument(client?.document || "");
+    $("#rentalClientCpf").value = client?.document || "";
     $("#rentalClientPhone").value = client?.phone || "";
     $("#rentalClientAddress").value = client?.address || "";
-    setDocumentFeedback($("#clientMatchInfo"), client ? `Cliente associado: ${client.name}` : "", client ? "success" : "");
+    $("#clientMatchInfo").textContent = client ? `Cliente associado: ${client.name}` : "";
     $("#rentalOrderDate").value = rental.orderDate || todayISO();
     $("#rentalStartDate").value = rental.startDate;
     $("#rentalEndDate").value = rental.endDate;
     $("#rentalEventLocation").value = rental.eventLocation || "";
-    $("#rentalDiscount").value = formatMoneyInput(rental.discount || 0);
-    $("#rentalFreight").value = formatMoneyInput(rental.freight || 0);
-    $("#rentalDeposit").value = formatMoneyInput(rental.deposit || 0);
+    $("#rentalDiscount").value = rental.discount || 0;
+    $("#rentalFreight").value = rental.freight || 0;
+    $("#rentalDeposit").value = rental.deposit || 0;
     $("#rentalPaymentMethod").value = rental.paymentMethod || "Pix";
     $("#rentalPaymentStatus").value = rental.paymentStatus || "unpaid";
     $("#rentalStatus").value = rental.status || "quote";
@@ -2142,45 +2090,34 @@
 
     const rows = rental.items
       .map((line, index) => `
-        <section class="return-row" data-return-row="${index}" data-rented-qty="${line.qty}">
-          <div class="return-row-head">
-            <strong>${escapeHtml(line.name)}</strong>
-            <span class="badge">${line.qty} alugado(s)</span>
-          </div>
-          <div class="return-quantity-grid">
+        <div class="return-row">
+          <strong>${escapeHtml(line.name)} · ${line.qty} alugado(s)</strong>
+          <div class="form-grid">
             <label>
-              Boas condições
-              <input type="number" min="0" max="${line.qty}" step="1" inputmode="numeric" value="${line.qty}" data-return-field="good" data-index="${index}">
+              Qtde com problema
+              <input type="number" min="0" max="${line.qty}" value="0" data-return-field="qty" data-index="${index}">
             </label>
             <label>
-              Danificada
-              <input type="number" min="0" max="${line.qty}" step="1" inputmode="numeric" value="0" data-return-field="damaged" data-index="${index}">
-            </label>
-            <label>
-              Quebrada/inutilizada
-              <input type="number" min="0" max="${line.qty}" step="1" inputmode="numeric" value="0" data-return-field="broken" data-index="${index}">
-            </label>
-            <label>
-              Perdida/não devolvida
-              <input type="number" min="0" max="${line.qty}" step="1" inputmode="numeric" value="0" data-return-field="lost" data-index="${index}">
+              Motivo
+              <select data-return-field="reason" data-index="${index}">
+                <option value="Danificado">Danificado</option>
+                <option value="Quebrado">Quebrado</option>
+                <option value="Perdido">Perdido</option>
+                <option value="Indisponível">Indisponível</option>
+              </select>
             </label>
           </div>
-          <label>
-            Observação deste item
-            <textarea rows="2" data-return-field="notes" data-index="${index}" placeholder="Opcional"></textarea>
-          </label>
-          <p class="return-balance muted-text" data-return-balance="${index}">${line.qty} de ${line.qty} unidade(s) classificada(s).</p>
-        </section>
+        </div>
       `)
       .join("");
 
     openModal("Registrar devolução", `
       <form id="returnForm">
-        <p class="muted-text">Classifique todas as unidades devolvidas. Itens danificados vão para manutenção; itens quebrados ou perdidos saem do total do estoque.</p>
+        <p class="muted-text">Informe somente os itens que voltaram quebrados, perdidos ou indisponíveis. O restante volta automaticamente para o estoque disponível.</p>
         ${rows}
         <label class="wide">
-          Observação geral da devolução
-          <textarea id="returnNotes" rows="3" placeholder="Opcional"></textarea>
+          Observação da devolução
+          <textarea id="returnNotes" rows="3" placeholder="Ex.: 1 forro manchado, 2 cadeiras quebradas"></textarea>
         </label>
         <div class="form-actions">
           <button class="secondary-action" type="button" data-close-modal="true">Cancelar</button>
@@ -2193,212 +2130,50 @@
       event.preventDefault();
       await confirmReturn(rental);
     });
-    $("#returnForm").addEventListener("input", handleReturnFormInput);
   }
 
   async function confirmReturn(rental) {
-    const returnItems = [];
-    const returnNotes = $("#returnNotes").value.trim();
-
-    for (const [index, line] of rental.items.entries()) {
-      const itemId = Number(line.itemId);
-      if (!Number.isFinite(itemId)) {
-        alert(`${line.name}: este item não possui vínculo válido com o estoque.`);
-        return;
-      }
-
-      const quantities = getReturnQuantities(index);
-      if (!quantities) {
-        return;
-      }
-
-      const classified = quantities.good + quantities.damaged + quantities.broken + quantities.lost;
-      const rentedQty = toWholeNumber(line.qty);
-      if (classified > rentedQty) {
-        alert(`${line.name}: a soma das quantidades não pode ser maior que ${rentedQty}.`);
-        return;
-      }
-      if (classified !== rentedQty) {
-        alert(`${line.name}: classifique todas as ${rentedQty} unidade(s) alugadas.`);
-        return;
-      }
-
-      returnItems.push({
-        itemId,
-        name: line.name,
-        rentedQty,
-        ...quantities,
-      });
-    }
-
-    // A mesma peça pode ter sido adicionada como avulsa e também por um conjunto.
-    // O estoque precisa receber a soma das duas linhas em uma única atualização.
-    const itemsById = new Map();
-    returnItems.forEach((returnedItem) => {
-      const previous = itemsById.get(returnedItem.itemId);
-      if (!previous) {
-        itemsById.set(returnedItem.itemId, { ...returnedItem });
-        return;
-      }
-
-      previous.rentedQty += returnedItem.rentedQty;
-      previous.good += returnedItem.good;
-      previous.damaged += returnedItem.damaged;
-      previous.broken += returnedItem.broken;
-      previous.lost += returnedItem.lost;
-      previous.notes = [previous.notes, returnedItem.notes].filter(Boolean).join(" | ");
-    });
-
-    const client = getClient(rental.clientId);
-    const now = new Date().toISOString();
-    const updatedItems = [];
-    const occurrences = [];
     const problems = [];
+    const rows = $$("[data-return-field='qty']");
 
-    for (const returnedItem of itemsById.values()) {
-      const item = await PlanetaDB.get("items", returnedItem.itemId);
-      if (!item) {
-        alert(`O item "${returnedItem.name}" não foi encontrado no estoque. Corrija o cadastro antes de concluir a devolução.`);
-        return;
-      }
+    for (const input of rows) {
+      const index = Number(input.dataset.index);
+      const line = rental.items[index];
+      const qty = Math.min(line.qty, Math.max(0, toNumber(input.value)));
+      const reason = $(`[data-return-field='reason'][data-index='${index}']`).value;
 
-      const removedQty = returnedItem.broken + returnedItem.lost;
-      const totalQty = toWholeNumber(item.totalQty);
-      if (removedQty > totalQty) {
-        alert(`${returnedItem.name}: não é possível retirar ${removedQty} unidade(s) de um total de ${totalQty}.`);
-        return;
-      }
-
-      updatedItems.push({
-        ...item,
-        totalQty: totalQty - removedQty,
-        maintenanceQty: getItemMaintenanceQty(item) + returnedItem.damaged,
-        brokenQty: getItemBrokenQty(item) + returnedItem.broken,
-        lostQty: getItemLostQty(item) + returnedItem.lost,
-        updatedAt: now,
-      });
-
-      const occurrenceBase = {
-        itemId: Number(item.id),
-        itemName: item.name,
-        rentalId: rental.id,
-        orderNumber: rental.orderNumber,
-        clientId: rental.clientId || null,
-        clientName: client?.name || "Cliente não encontrado",
-        occurredAt: now,
-        notes: returnedItem.notes || returnNotes,
-      };
-      const entries = [
-        { qty: returnedItem.good, status: "Devolvido em boas condições", type: "return-good" },
-        { qty: returnedItem.damaged, status: "Danificado - em manutenção", type: "return-damaged" },
-        { qty: returnedItem.broken, status: "Quebrado/inutilizado", type: "return-broken" },
-        { qty: returnedItem.lost, status: "Perdido/não devolvido", type: "return-lost" },
-      ];
-
-      entries.forEach((entry) => {
-        if (entry.qty > 0) {
-          occurrences.push({ ...occurrenceBase, ...entry });
-        }
-      });
-
-      if (returnedItem.damaged > 0) {
-        problems.push({ itemId: item.id, name: item.name, qty: returnedItem.damaged, reason: "Danificado - em manutenção" });
-      }
-      if (returnedItem.broken > 0) {
-        problems.push({ itemId: item.id, name: item.name, qty: returnedItem.broken, reason: "Quebrado/inutilizado" });
-      }
-      if (returnedItem.lost > 0) {
-        problems.push({ itemId: item.id, name: item.name, qty: returnedItem.lost, reason: "Perdido/não devolvido" });
+      if (qty > 0) {
+        problems.push({
+          itemId: line.itemId,
+          name: line.name,
+          qty,
+          reason,
+        });
       }
     }
 
-    try {
-      await PlanetaDB.completeRentalReturn({
-        ...rental,
-        status: "returned",
-        returnItems,
-        returnProblems: problems,
-        returnNotes,
-        returnedAt: now,
-        updatedAt: now,
-      }, updatedItems, occurrences);
-    } catch (error) {
-      console.error(error);
-      alert("Não foi possível registrar a devolução. Nenhuma alteração foi concluída; tente novamente.");
-      return;
+    for (const problem of problems) {
+      const item = await PlanetaDB.get("items", Number(problem.itemId));
+      if (item) {
+        item.unavailableQty = Math.min(Number(item.totalQty) || 0, (Number(item.unavailableQty) || 0) + problem.qty);
+        item.updatedAt = new Date().toISOString();
+        await PlanetaDB.put("items", item);
+      }
     }
+
+    await PlanetaDB.put("rentals", {
+      ...rental,
+      status: "returned",
+      returnProblems: problems,
+      returnNotes: $("#returnNotes").value.trim(),
+      returnedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
 
     closeModal();
     await loadAll();
     refreshAll();
     showToast("Devolução registrada.");
-  }
-
-  function handleReturnFormInput(event) {
-    const input = event.target.closest("[data-return-field]");
-    if (!input || input.dataset.returnField === "notes") {
-      return;
-    }
-
-    const index = Number(input.dataset.index);
-    const row = $(`[data-return-row='${index}']`);
-    if (!row) {
-      return;
-    }
-
-    if (input.dataset.returnField !== "good") {
-      const rentedQty = toWholeNumber(row.dataset.rentedQty);
-      const damaged = getReturnFieldValue(index, "damaged");
-      const broken = getReturnFieldValue(index, "broken");
-      const lost = getReturnFieldValue(index, "lost");
-      const goodInput = $(`[data-return-field='good'][data-index='${index}']`);
-      goodInput.value = Math.max(0, rentedQty - damaged - broken - lost);
-    }
-
-    updateReturnBalance(index);
-  }
-
-  function updateReturnBalance(index) {
-    const row = $(`[data-return-row='${index}']`);
-    const balance = $(`[data-return-balance='${index}']`);
-    if (!row || !balance) {
-      return;
-    }
-
-    const rentedQty = toWholeNumber(row.dataset.rentedQty);
-    const quantities = getReturnQuantities(index, false);
-    if (!quantities) {
-      balance.textContent = "Informe somente números inteiros maiores ou iguais a zero.";
-      balance.classList.add("return-balance-error");
-      return;
-    }
-
-    const classified = quantities.good + quantities.damaged + quantities.broken + quantities.lost;
-    balance.textContent = `${classified} de ${rentedQty} unidade(s) classificada(s).`;
-    balance.classList.toggle("return-balance-error", classified !== rentedQty);
-  }
-
-  function getReturnQuantities(index, showAlert = true) {
-    const fields = ["good", "damaged", "broken", "lost"];
-    const values = {};
-    for (const field of fields) {
-      const input = $(`[data-return-field='${field}'][data-index='${index}']`);
-      const qty = toWholeNumber(input?.value, null);
-      if (qty === null || qty < 0) {
-        if (showAlert) {
-          alert("Informe somente quantidades inteiras maiores ou iguais a zero.");
-        }
-        return null;
-      }
-      values[field] = qty;
-    }
-
-    values.notes = $(`[data-return-field='notes'][data-index='${index}']`)?.value.trim() || "";
-    return values;
-  }
-
-  function getReturnFieldValue(index, field) {
-    return toWholeNumber($(`[data-return-field='${field}'][data-index='${index}']`)?.value, 0);
   }
 
   async function cancelRental(rental) {
@@ -2455,12 +2230,12 @@
           <input name="totalQty" type="number" min="0" inputmode="numeric" required value="${item?.totalQty ?? 0}">
         </label>
         <label>
-          Indisponível manual
+          Indisponível
           <input name="unavailableQty" type="number" min="0" inputmode="numeric" value="${item?.unavailableQty ?? 0}">
         </label>
         <label>
           Valor padrão
-          <input name="defaultPrice" type="text" inputmode="decimal" autocomplete="off" value="${escapeAttr(formatMoneyInput(item?.defaultPrice ?? 0))}">
+          <input name="defaultPrice" type="number" min="0" step="0.01" inputmode="decimal" value="${item?.defaultPrice ?? 0}">
         </label>
         <label class="wide">
           Observações
@@ -2473,14 +2248,9 @@
       </form>
     `);
 
-    const itemForm = $("#itemForm");
-    bindMoneyInput(itemForm.defaultPrice);
-    itemForm.addEventListener("submit", async (event) => {
+    $("#itemForm").addEventListener("submit", async (event) => {
       event.preventDefault();
-      const saved = await saveItemFromForm(event.currentTarget, item);
-      if (!saved) {
-        return;
-      }
+      await saveItemFromForm(event.currentTarget, item);
       closeModal();
       await loadAll();
       refreshAll();
@@ -2489,17 +2259,8 @@
   }
 
   async function saveItemFromForm(form, item = null) {
-    const totalQty = Math.max(0, toWholeNumber(form.totalQty.value, 0));
-    const maintenanceQty = getItemMaintenanceQty(item);
-    const defaultPrice = validateMoneyField(form.defaultPrice, "Valor padrão");
-    if (defaultPrice === null) {
-      return null;
-    }
-    if (totalQty < maintenanceQty) {
-      alert(`A quantidade total não pode ser menor que as ${maintenanceQty} unidade(s) em manutenção.`);
-      return null;
-    }
-    const unavailableQty = Math.min(totalQty - maintenanceQty, Math.max(0, toWholeNumber(form.unavailableQty.value, 0)));
+    const totalQty = Math.max(0, toNumber(form.totalQty.value));
+    const unavailableQty = Math.min(totalQty, Math.max(0, toNumber(form.unavailableQty.value)));
     const now = new Date().toISOString();
     const payload = {
       id: item?.id,
@@ -2508,10 +2269,7 @@
       color: form.color.value.trim(),
       totalQty,
       unavailableQty,
-      maintenanceQty,
-      brokenQty: getItemBrokenQty(item),
-      lostQty: getItemLostQty(item),
-      defaultPrice,
+      defaultPrice: Math.max(0, toNumber(form.defaultPrice.value)),
       notes: form.notes.value.trim(),
       createdAt: item?.createdAt || now,
       updatedAt: now,
@@ -2555,29 +2313,12 @@
           })
           .join("")
       : emptyState("Nenhuma locação encontrada para este item.");
-    const occurrences = getItemOccurrenceHistory(item.id);
-    const occurrencesHtml = occurrences.length
-      ? occurrences
-          .map((occurrence) => `
-            <div class="compact-item item-history-row">
-              <div>
-                <strong>${escapeHtml(occurrence.status || "Ocorrência registrada")}</strong>
-                <span>${formatDateTime(occurrence.occurredAt)}${occurrence.orderNumber ? ` · Pedido ${escapeHtml(occurrence.orderNumber)}` : ""}</span>
-                <span>${escapeHtml(occurrence.clientName || "Sem cliente")}${occurrence.notes ? ` · ${escapeHtml(occurrence.notes)}` : ""}</span>
-              </div>
-              <span>${escapeHtml(occurrence.qty || 0)} un.</span>
-            </div>
-          `)
-          .join("")
-      : emptyState("Nenhuma ocorrência de devolução ou manutenção para este item.");
-    const maintenanceQty = getItemMaintenanceQty(item);
 
     openModal(`Detalhes do item`, `
       <div class="item-detail-modal">
         <div class="item-detail-tabs" role="tablist" aria-label="Detalhes do item">
-          <button class="tab-btn active" type="button" data-item-tab="info" aria-selected="true">Informações</button>
+          <button class="tab-btn active" type="button" data-item-tab="info" aria-selected="true">Informacoes</button>
           <button class="tab-btn" type="button" data-item-tab="stock" aria-selected="false">Estoque</button>
-          <button class="tab-btn" type="button" data-item-tab="maintenance" aria-selected="false">Manutenção</button>
           <button class="tab-btn" type="button" data-item-tab="rentals" aria-selected="false">Locacoes</button>
           <button class="tab-btn" type="button" data-item-tab="edit" aria-selected="false">Editar</button>
         </div>
@@ -2597,38 +2338,15 @@
           <div class="metric-grid">
             <div class="metric"><span>Total cadastrado</span><strong>${stats.total}</strong></div>
             <div class="metric"><span>Disponível no período</span><strong>${periodStats.available}</strong></div>
-            <div class="metric"><span>Alugado</span><strong>${stats.rentedActive}</strong></div>
-            <div class="metric"><span>Em manutenção</span><strong>${stats.maintenance}</strong></div>
-            <div class="metric"><span>Quebrado/perdido</span><strong>${stats.brokenLost}</strong></div>
+            <div class="metric"><span>Ocupado no período</span><strong>${periodStats.occupied}</strong></div>
             <div class="metric"><span>Reservado no período</span><strong>${periodStats.reserved}</strong></div>
+            <div class="metric"><span>Entregue/alugado</span><strong>${periodStats.delivered}</strong></div>
             <div class="metric"><span>Reservado em datas futuras</span><strong>${stats.futureReserved}</strong></div>
             <div class="metric"><span>Próxima reserva</span><strong>${stats.nextReservationDate ? formatDate(stats.nextReservationDate) : "-"}</strong></div>
-            <div class="metric"><span>Indisponível manual</span><strong>${stats.unavailable}</strong></div>
+            <div class="metric"><span>Indisponivel</span><strong>${stats.unavailable}</strong></div>
+            <div class="metric"><span>Devolvido</span><strong>${stats.returned}</strong></div>
           </div>
           ${conflictText ? `<p class="muted-text"><strong>Uso no período:</strong><br>${conflictText}</p>` : `<p class="muted-text">Nenhuma locação ocupando este item no período consultado.</p>`}
-        </section>
-
-        <section class="item-tab-panel hidden" data-item-tab-panel="maintenance">
-          <div class="detail-grid">
-            <div class="metric"><span>Em manutenção</span><strong>${maintenanceQty}</strong></div>
-            <div class="metric"><span>Quebrado/perdido (histórico)</span><strong>${stats.brokenLost}</strong></div>
-          </div>
-          <form id="maintenanceRepairForm" class="form-grid maintenance-form">
-            <label>
-              Quantidade reparada e pronta
-              <input name="qty" type="number" min="1" max="${maintenanceQty}" step="1" inputmode="numeric" ${maintenanceQty ? "required" : "disabled"}>
-            </label>
-            <label class="wide">
-              Observação do reparo
-              <textarea name="notes" rows="2" placeholder="Opcional: reparo feito, custo ou responsável" ${maintenanceQty ? "" : "disabled"}></textarea>
-            </label>
-            <div class="form-actions wide">
-              <button class="primary-action" type="submit" ${maintenanceQty ? "" : "disabled"}>Confirmar reparo</button>
-            </div>
-          </form>
-          ${maintenanceQty ? "" : `<p class="muted-text">Não há unidades em manutenção neste momento.</p>`}
-          <h3 class="detail-subtitle">Histórico de ocorrências</h3>
-          <div class="compact-list">${occurrencesHtml}</div>
         </section>
 
         <section class="item-tab-panel hidden" data-item-tab-panel="rentals">
@@ -2661,12 +2379,12 @@
               <input name="totalQty" type="number" min="0" inputmode="numeric" required value="${item.totalQty ?? 0}">
             </label>
             <label>
-              Indisponível manual
+              Indisponivel
               <input name="unavailableQty" type="number" min="0" inputmode="numeric" value="${item.unavailableQty ?? 0}">
             </label>
             <label>
               Valor padrao
-              <input name="defaultPrice" type="text" inputmode="decimal" autocomplete="off" value="${escapeAttr(formatMoneyInput(item.defaultPrice ?? 0))}">
+              <input name="defaultPrice" type="number" min="0" step="0.01" inputmode="decimal" value="${item.defaultPrice ?? 0}">
             </label>
             <label class="wide">
               Observacoes
@@ -2698,9 +2416,7 @@
       });
     });
 
-    const itemDetailsForm = $("#itemDetailsForm");
-    bindMoneyInput(itemDetailsForm.defaultPrice);
-    itemDetailsForm.addEventListener("submit", async (event) => {
+    $("#itemDetailsForm").addEventListener("submit", async (event) => {
       event.preventDefault();
       const saved = await saveItemFromForm(event.currentTarget, item);
       if (!saved) {
@@ -2712,53 +2428,6 @@
       showToast("Item atualizado.");
       openItemDetailsModal(getItem(saved.id || item.id) || saved);
     });
-
-    const maintenanceForm = $("#maintenanceRepairForm");
-    maintenanceForm?.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      await confirmMaintenanceRepair(item, event.currentTarget);
-    });
-  }
-
-  async function confirmMaintenanceRepair(item, form) {
-    const qty = toWholeNumber(form.qty.value, null);
-    const maintenanceQty = getItemMaintenanceQty(item);
-    if (qty === null || qty < 1 || qty > maintenanceQty) {
-      alert(`Informe uma quantidade entre 1 e ${maintenanceQty}.`);
-      return;
-    }
-
-    const now = new Date().toISOString();
-    const updatedItem = {
-      ...item,
-      maintenanceQty: maintenanceQty - qty,
-      updatedAt: now,
-    };
-    const occurrence = {
-      type: "maintenance-repaired",
-      status: "Reparado e disponível",
-      itemId: item.id,
-      itemName: item.name,
-      rentalId: null,
-      orderNumber: null,
-      clientId: null,
-      clientName: "",
-      qty,
-      notes: form.notes.value.trim(),
-      occurredAt: now,
-    };
-
-    try {
-      await PlanetaDB.updateItemWithOccurrence(updatedItem, occurrence);
-    } catch (error) {
-      console.error(error);
-      alert("Não foi possível registrar o reparo. Tente novamente.");
-      return;
-    }
-    await loadAll();
-    refreshAll();
-    showToast(`${qty} unidade(s) voltou(ram) para disponível.`);
-    openItemDetailsModal(getItem(item.id) || updatedItem);
   }
 
   function getItemRentalHistory(itemId) {
@@ -2776,12 +2445,6 @@
       });
   }
 
-  function getItemOccurrenceHistory(itemId) {
-    return state.itemOccurrences
-      .filter((occurrence) => Number(occurrence.itemId) === Number(itemId))
-      .sort((a, b) => String(b.occurredAt || "").localeCompare(String(a.occurredAt || "")));
-  }
-
   function openClientModal(client = null) {
     const title = client ? "Editar cliente" : "Cadastrar cliente";
     openModal(title, `
@@ -2796,9 +2459,8 @@
         </label>
         <label>
           CPF ou CNPJ
-          <input id="clientDocumentInput" name="document" type="text" inputmode="numeric" autocomplete="off" maxlength="18" placeholder="000.000.000-00 ou 00.000.000/0000-00" value="${escapeAttr(formatDocument(client?.document || ""))}">
+          <input name="document" type="text" value="${escapeAttr(client?.document || "")}">
         </label>
-        <p id="clientDocumentInfo" class="form-feedback wide" role="status" aria-live="polite"></p>
         <label class="wide">
           Endereço
           <input name="address" type="text" value="${escapeAttr(client?.address || "")}">
@@ -2814,29 +2476,15 @@
       </form>
     `);
 
-    const documentInput = $("#clientDocumentInput");
-    documentInput.addEventListener("input", () => {
-      documentInput.value = formatDocument(documentInput.value);
-      setDocumentFeedback($("#clientDocumentInfo"));
-    });
-    documentInput.addEventListener("blur", () => {
-      validateClientDocumentField(client, true);
-    });
-
     $("#clientForm").addEventListener("submit", async (event) => {
       event.preventDefault();
       const form = event.currentTarget;
-      const documentValidation = validateClientDocumentField(client, true);
-      if (!documentValidation) {
-        documentInput.focus();
-        return;
-      }
       const now = new Date().toISOString();
       const payload = {
         id: client?.id,
         name: form.name.value.trim(),
         phone: form.phone.value.trim(),
-        document: formatDocument(documentValidation.digits),
+        document: form.document.value.trim(),
         address: form.address.value.trim(),
         notes: form.notes.value.trim(),
         createdAt: client?.createdAt || now,
@@ -2862,8 +2510,9 @@
     });
   }
 
-  async function openReceiptModal(rental, clientOverride = null) {
-    return openOfficialContractModal(rental, clientOverride);
+  function openReceiptModal(rental, clientOverride = null) {
+    void openOfficialContractModal(rental, clientOverride);
+    return;
 
     const client = clientOverride || getClient(rental.clientId);
     const totals = getRentalTotals(rental);
@@ -2903,7 +2552,7 @@
           <div>
             <strong>Cliente:</strong> ${escapeHtml(client?.name || "Cliente não encontrado")}<br>
             <strong>Telefone:</strong> ${escapeHtml(client?.phone || "-")}<br>
-            <strong>${getDocumentLabel(client?.document)}:</strong> ${escapeHtml(client?.document ? formatDocument(client.document) : "-")}<br>
+            <strong>Documento:</strong> ${escapeHtml(client?.document || "-")}<br>
             <strong>Endereço:</strong> ${escapeHtml(client?.address || "-")}
           </div>
           <div>
@@ -2965,108 +2614,29 @@
     $("#shareReceiptBtn").addEventListener("click", () => shareReceipt(rental, client));
   }
 
-  function resolveContractContext(rentalReference, clientOverride = null) {
-    const referenceId = Number(rentalReference?.id || rentalReference);
-    const savedRental = referenceId ? getRental(referenceId) : null;
-    const rental = savedRental || (typeof rentalReference === "object" ? rentalReference : null);
-
-    if (!rental) {
-      return { error: "A locação selecionada não foi encontrada. Atualize a lista e tente novamente." };
-    }
-    if (!rental.startDate || !rental.endDate) {
-      return { error: "Esta locação não possui as datas de início e fim necessárias para o contrato." };
-    }
-    if (!Array.isArray(rental.items) || !rental.items.length) {
-      return { error: "Esta locação não possui itens salvos para incluir no contrato." };
-    }
-
-    const items = rental.items.map((line, index) => {
-      const stockItem = getItem(line.itemId);
-      return {
-        ...line,
-        name: line.name || stockItem?.name || "",
-        index,
-      };
-    });
-    const missingItem = items.find((line) => !line.name);
-    if (missingItem) {
-      return { error: `O item ${missingItem.index + 1} desta locação não possui um nome salvo. Edite a locação antes de gerar o contrato.` };
-    }
-
-    const client = clientOverride || getClient(rental.clientId);
-    if (!client) {
-      return { error: "O cliente vinculado a esta locação não foi encontrado. Verifique o cadastro do cliente antes de gerar o contrato." };
-    }
-
-    return {
-      rental: { ...rental, items },
-      client,
-    };
-  }
-
-  async function openOfficialContractModal(rentalReference, clientOverride = null) {
-    const context = resolveContractContext(rentalReference, clientOverride);
-    if (context.error) {
-      alert(`Não foi possível gerar o contrato. ${context.error}`);
-      return false;
-    }
-
-    const requestId = ++state.contractRequestId;
-    openModal("Preparando contrato", `
-      <div class="contract-loading" role="status" aria-live="polite">
-        <strong>Preparando a prévia do contrato...</strong>
-        <span>Os dados da locação estão sendo carregados.</span>
-      </div>
-    `);
-
+  async function openOfficialContractModal(rental, clientOverride = null) {
     try {
-      const contractHtml = await renderOfficialContractHtml(context.rental, context.client);
-      if (requestId !== state.contractRequestId) {
-        return false;
-      }
+      const client = clientOverride || getClient(rental.clientId);
+      const contractHtml = await renderOfficialContractHtml(rental, client);
 
       openModal("Contrato de aluguel", `
         <div class="contract-preview-wrap">
           <iframe id="contractPreviewFrame" class="contract-frame" title="Prévia do contrato de aluguel"></iframe>
         </div>
-        <p id="contractPreviewStatus" class="muted-text" role="status" aria-live="polite">Carregando a prévia...</p>
         <div class="form-actions no-print">
           <button class="secondary-action" type="button" data-close-modal="true">Fechar</button>
-          <button class="primary-action" type="button" id="generatePdfBtn" disabled>Gerar PDF</button>
-          <button class="secondary-action" type="button" id="savePdfBtn" disabled>Salvar PDF</button>
-          <button class="secondary-action" type="button" id="printReceiptBtn" disabled>Imprimir no navegador</button>
+          <button class="primary-action" type="button" id="printReceiptBtn">Gerar PDF / imprimir</button>
           <button class="primary-action red" type="button" id="shareReceiptBtn">Compartilhar resumo</button>
         </div>
       `);
 
       const frame = $("#contractPreviewFrame");
-      frame.addEventListener("load", () => {
-        const printButton = $("#printReceiptBtn");
-        const generateButton = $("#generatePdfBtn");
-        const status = $("#contractPreviewStatus");
-        if (printButton) {
-          printButton.disabled = false;
-        }
-        if (generateButton) {
-          generateButton.disabled = false;
-        }
-        if (status) {
-          status.textContent = "Prévia pronta. Toque em Gerar PDF para criar o arquivo do contrato.";
-        }
-      }, { once: true });
       frame.srcdoc = contractHtml;
-      $("#generatePdfBtn").addEventListener("click", () => prepareContractPdf(frame, context.rental));
-      $("#savePdfBtn").addEventListener("click", () => savePreparedContractPdf());
       $("#printReceiptBtn").addEventListener("click", () => printContractFrame(frame));
-      $("#shareReceiptBtn").addEventListener("click", () => shareReceipt(context.rental, context.client));
-      return true;
+      $("#shareReceiptBtn").addEventListener("click", () => shareReceipt(rental, client));
     } catch (error) {
       console.error(error);
-      if (requestId === state.contractRequestId) {
-        const detail = error?.message ? ` ${error.message}` : "";
-        alert(`Não foi possível gerar o contrato.${detail}`);
-      }
-      return false;
+      alert("Não foi possível gerar o contrato. Verifique se o template oficial está no projeto.");
     }
   }
 
@@ -3147,8 +2717,7 @@
       data_emissao: formatDate(todayISO()),
       nome_cliente: escapeHtml(client?.name || ""),
       telefone_cliente: escapeHtml(client?.phone || ""),
-      documento_label: escapeHtml(getDocumentLabel(client?.document)),
-      cpf_cnpj: escapeHtml(client?.document ? formatDocument(client.document) : ""),
+      cpf_cnpj: escapeHtml(client?.document || ""),
       endereco_cliente: escapeHtml(client?.address || ""),
       referencia_endereco: "",
       periodo: escapeHtml(`${formatDate(rental.startDate)} a ${formatDate(rental.endDate)}`),
@@ -3216,189 +2785,13 @@
   }
 
   function printContractFrame(frame) {
-    if (!frame?.contentWindow || !frame?.contentDocument) {
+    if (!frame?.contentWindow) {
       alert("A prévia do contrato ainda não carregou. Tente novamente em alguns segundos.");
       return;
     }
 
-    if (frame.contentDocument.readyState !== "complete") {
-      alert("A prévia do contrato ainda está carregando. Aguarde um instante e tente novamente.");
-      return;
-    }
-
-    try {
-      frame.contentWindow.focus();
-      frame.contentWindow.print();
-    } catch (error) {
-      console.error(error);
-      alert("Não foi possível abrir a impressão. Tente novamente após a prévia terminar de carregar.");
-    }
-  }
-
-  async function prepareContractPdf(frame, rental) {
-    if (!frame?.contentDocument || frame.contentDocument.readyState !== "complete") {
-      alert("A prévia do contrato ainda está carregando. Aguarde um instante e tente novamente.");
-      return;
-    }
-
-    if (typeof window.html2pdf !== "function") {
-      alert("O gerador de PDF não carregou. Feche o contrato, atualize o aplicativo e tente novamente.");
-      return;
-    }
-
-    const page = frame.contentDocument.querySelector(".page");
-    if (!page) {
-      alert("Não foi possível preparar o conteúdo do contrato para PDF.");
-      return;
-    }
-
-    const generateButton = $("#generatePdfBtn");
-    const saveButton = $("#savePdfBtn");
-    const status = $("#contractPreviewStatus");
-    if (generateButton) {
-      generateButton.disabled = true;
-      generateButton.textContent = "Gerando PDF...";
-    }
-    if (status) {
-      status.textContent = "Gerando o PDF no aparelho. Isso pode levar alguns segundos.";
-    }
-
-    try {
-      const filename = getContractPdfFilename(rental);
-      const worker = window.html2pdf()
-        .set({
-          margin: 4.5,
-          filename,
-          image: { type: "jpeg", quality: 0.98 },
-          html2canvas: {
-            backgroundColor: "#ffffff",
-            logging: false,
-            scale: 2,
-            useCORS: true,
-          },
-          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-          pagebreak: { mode: ["css", "legacy"] },
-        })
-        .from(page)
-        .toPdf();
-      const pdf = await worker.get("pdf");
-      const file = new File([pdf.output("blob")], filename, { type: "application/pdf" });
-      state.preparedContractPdf = {
-        file,
-        rentalId: rental.id,
-        title: `Contrato ${rental.orderNumber || "Planeta Locações"}`,
-      };
-
-      if (shouldUseNativePdfSave()) {
-        if (saveButton) {
-          saveButton.disabled = false;
-        }
-        if (status) {
-          status.textContent = "PDF pronto. Toque em Salvar PDF e escolha Arquivos, WhatsApp ou outro destino.";
-        }
-        return;
-      }
-
-      downloadPreparedPdf();
-      if (status) {
-        status.textContent = "PDF pronto e baixado neste navegador.";
-      }
-    } catch (error) {
-      console.error(error);
-      state.preparedContractPdf = null;
-      if (status) {
-        status.textContent = "Não foi possível gerar o PDF. Tente novamente.";
-      }
-      alert("Não foi possível gerar o PDF do contrato. Tente novamente após a prévia terminar de carregar.");
-    } finally {
-      if (generateButton) {
-        generateButton.disabled = false;
-        generateButton.textContent = "Gerar PDF";
-      }
-    }
-  }
-
-  async function savePreparedContractPdf() {
-    if (!state.preparedContractPdf?.file) {
-      alert("Primeiro toque em Gerar PDF para preparar o arquivo.");
-      return;
-    }
-
-    const status = $("#contractPreviewStatus");
-    const saveButton = $("#savePdfBtn");
-    if (saveButton) {
-      saveButton.disabled = true;
-    }
-
-    try {
-      const { file, title } = state.preparedContractPdf;
-      if (canSharePdfFile(file)) {
-        await navigator.share({ title, files: [file] });
-        if (status) {
-          status.textContent = "PDF compartilhado. Ele pode ser salvo em Arquivos ou enviado pelo destino escolhido.";
-        }
-        showToast("PDF pronto para salvar ou compartilhar.");
-      } else {
-        downloadPreparedPdf();
-        if (status) {
-          status.textContent = "PDF pronto. Verifique os downloads deste navegador.";
-        }
-      }
-    } catch (error) {
-      if (error?.name === "AbortError") {
-        if (status) {
-          status.textContent = "Salvamento cancelado. O PDF continua pronto para uma nova tentativa.";
-        }
-      } else {
-        console.error(error);
-        alert("Não foi possível abrir as opções para salvar o PDF. Tente novamente.");
-      }
-    } finally {
-      if (saveButton) {
-        saveButton.disabled = false;
-      }
-    }
-  }
-
-  function getContractPdfFilename(rental) {
-    const reference = String(rental?.orderNumber || rental?.id || "contrato")
-      .replace(/[^a-zA-Z0-9_-]+/g, "-")
-      .replace(/^-+|-+$/g, "");
-    return `contrato-planeta-locacoes-${reference || "locacao"}.pdf`;
-  }
-
-  function shouldUseNativePdfSave() {
-    const isAppleMobile = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    const isStandalone = window.matchMedia?.("(display-mode: standalone)").matches || navigator.standalone === true;
-    return isAppleMobile || isStandalone;
-  }
-
-  function canSharePdfFile(file) {
-    try {
-      return typeof navigator.share === "function" &&
-        typeof navigator.canShare === "function" &&
-        navigator.canShare({ files: [file] });
-    } catch (error) {
-      return false;
-    }
-  }
-
-  function downloadPreparedPdf() {
-    const file = state.preparedContractPdf?.file;
-    if (!file) {
-      throw new Error("PDF não preparado.");
-    }
-
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(file);
-    link.href = url;
-    link.download = file.name;
-    link.style.display = "none";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    frame.contentWindow.focus();
+    frame.contentWindow.print();
   }
 
   async function shareReceipt(rental, client) {
@@ -3973,7 +3366,7 @@
         </label>
         <label>
           Valor
-          <input name="amount" type="text" inputmode="decimal" autocomplete="off" required value="${escapeAttr(formatMoneyInput(expense?.amount ?? 0))}">
+          <input name="amount" type="number" min="0" step="0.01" inputmode="decimal" required value="${expense?.amount ?? 0}">
         </label>
         <label>
           ${isInstallment ? "Data de vencimento" : "Data"}
@@ -4005,16 +3398,10 @@
       </form>
     `);
 
-    const expenseForm = $("#expenseForm");
-    bindMoneyInput(expenseForm.amount);
-    expenseForm.addEventListener("submit", async (event) => {
+    $("#expenseForm").addEventListener("submit", async (event) => {
       event.preventDefault();
       const form = event.currentTarget;
       const now = new Date().toISOString();
-      const amount = validateMoneyField(form.amount, "Valor", { required: true });
-      if (amount === null) {
-        return;
-      }
 
       if (form.status.value === "installment") {
         closeModal();
@@ -4022,7 +3409,7 @@
           description: form.description.value.trim(),
           category: form.category.value.trim(),
           expenseType: form.expenseType.value,
-          totalAmount: amount,
+          totalAmount: Math.max(0, toNumber(form.amount.value)),
           paymentMethod: form.paymentMethod.value,
           notes: form.notes.value.trim(),
         });
@@ -4035,7 +3422,7 @@
         expenseType: form.expenseType.value,
         description: form.description.value.trim(),
         category: form.category.value.trim() || "Outro",
-        amount,
+        amount: Math.max(0, toNumber(form.amount.value)),
         paymentMethod: form.paymentMethod.value,
         status: form.status.value,
         notes: form.notes.value.trim(),
@@ -4097,7 +3484,7 @@
         </label>
         <label>
           Valor total
-          <input name="totalAmount" type="text" inputmode="decimal" autocomplete="off" required value="${escapeAttr(formatMoneyInput(totalAmount))}">
+          <input name="totalAmount" type="number" min="0" step="0.01" inputmode="decimal" required value="${escapeAttr(totalAmount)}">
         </label>
         <label>
           Primeiro vencimento
@@ -4109,7 +3496,7 @@
         </label>
         <label>
           Valor de cada parcela
-          <input name="amount" type="text" inputmode="decimal" readonly>
+          <input name="amount" type="number" min="0" step="0.01" inputmode="decimal" readonly>
         </label>
         <label>
           Vencimento das próximas parcelas
@@ -4145,20 +3532,16 @@
     const syncInstallmentAmount = () => {
       const total = Math.max(0, toNumber(form.totalAmount.value));
       const installments = Math.max(1, Math.floor(toNumber(form.installmentTotal.value)));
-      form.amount.value = formatMoneyInput(installments ? roundMoney(total / installments) : 0);
+      form.amount.value = installments ? roundMoney(total / installments).toFixed(2) : "0.00";
     };
-    bindMoneyInput(form.totalAmount, syncInstallmentAmount);
+    form.totalAmount.addEventListener("input", syncInstallmentAmount);
     form.installmentTotal.addEventListener("input", syncInstallmentAmount);
     syncInstallmentAmount();
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const total = Math.max(1, Math.floor(toNumber(form.installmentTotal.value)));
-      const totalAmount = validateMoneyField(form.totalAmount, "Valor total", { required: true });
-      if (totalAmount === null) {
-        return;
-      }
-      const totalAmountValue = roundMoney(totalAmount);
+      const totalAmountValue = roundMoney(toNumber(form.totalAmount.value));
       const baseAmount = roundMoney(totalAmountValue / total);
 
       if (!form.description.value.trim() || !totalAmountValue || !form.dueDate.value) {
@@ -4303,7 +3686,6 @@
       rentals: Array.isArray(data.stores.rentals) ? data.stores.rentals.length : 0,
       expenses: Array.isArray(data.stores.expenses) ? data.stores.expenses.length : 0,
       kits: Array.isArray(data.stores.kits) ? data.stores.kits.length : 0,
-      itemOccurrences: Array.isArray(data.stores.itemOccurrences) ? data.stores.itemOccurrences.length : 0,
     };
 
     return [
@@ -4311,7 +3693,6 @@
       `Conjuntos/kits: ${counts.kits}`,
       `Clientes: ${counts.clients}`,
       `Locações: ${counts.rentals}`,
-      `Ocorrências de itens: ${counts.itemOccurrences}`,
       `Gastos/parcelas: ${counts.expenses}`,
     ].join("\n");
   }
@@ -4368,13 +3749,8 @@
     const stats = {
       total: Number(item.totalQty) || 0,
       unavailable: Number(item.unavailableQty) || 0,
-      maintenance: getItemMaintenanceQty(item),
-      broken: getItemBrokenQty(item),
-      lost: getItemLostQty(item),
-      brokenLost: getItemBrokenQty(item) + getItemLostQty(item),
       reservedToday: 0,
       rentedToday: 0,
-      rentedActive: 0,
       futureReserved: 0,
       nextReservationDate: "",
       returned: 0,
@@ -4391,11 +3767,7 @@
           stats.reservedToday += qty;
         } else if (rental.status === "delivered" && datesOverlap(today, today, rental.startDate, rental.endDate)) {
           stats.rentedToday += qty;
-        }
-        if (rental.status === "delivered") {
-          stats.rentedActive += qty;
-        }
-        if (rental.status === "returned") {
+        } else if (rental.status === "returned") {
           stats.returned += qty;
         }
 
@@ -4405,7 +3777,7 @@
     const future = getFutureReservationStats(item, today);
     stats.futureReserved = future.qty;
     stats.nextReservationDate = future.nextDate;
-    stats.availableToday = Math.max(0, stats.total - stats.unavailable - stats.maintenance - stats.reservedToday - stats.rentedToday);
+    stats.availableToday = Math.max(0, stats.total - stats.unavailable - stats.reservedToday - stats.rentedToday);
     return stats;
   }
 
@@ -4422,16 +3794,14 @@
     const occupied = reserved + delivered;
     const total = Number(item?.totalQty) || 0;
     const unavailable = Number(item?.unavailableQty) || 0;
-    const maintenance = getItemMaintenanceQty(item);
 
     return {
       total,
       unavailable,
-      maintenance,
       reserved,
       delivered,
       occupied,
-      available: Math.max(0, total - unavailable - maintenance - occupied),
+      available: Math.max(0, total - unavailable - occupied),
       conflicts,
     };
   }
@@ -4506,7 +3876,7 @@
     const used = getItemPeriodConflicts(item, startDate, endDate, ignoreRentalId)
       .reduce((sum, conflict) => sum + conflict.qty, 0);
 
-    return Math.max(0, (Number(item.totalQty) || 0) - (Number(item.unavailableQty) || 0) - getItemMaintenanceQty(item) - used);
+    return Math.max(0, (Number(item.totalQty) || 0) - (Number(item.unavailableQty) || 0) - used);
   }
 
   function getItemPeriodConflicts(item, startDate, endDate, ignoreRentalId = null) {
@@ -4649,8 +4019,6 @@
   }
 
   function closeModal() {
-    state.contractRequestId += 1;
-    state.preparedContractPdf = null;
     $("#modalRoot").innerHTML = "";
     document.body.classList.remove("modal-open");
   }
@@ -4705,21 +4073,17 @@
     return "yellow";
   }
 
-  function findClientByDocumentDigits(documentDigits) {
-    if (!documentDigits) {
-      return null;
-    }
-
-    return state.clients.find((client) => onlyDigits(client.document) === documentDigits) || null;
+  function findClientByCpfDigits(cpfDigits) {
+    return state.clients.find((client) => onlyDigits(client.document) === cpfDigits);
   }
 
   async function ensureRentalClient(clientDraft, currentClientId = null) {
     const now = new Date().toISOString();
-    const documentDigits = onlyDigits(clientDraft.document);
-    const existingByDocument = findClientByDocumentDigits(documentDigits);
+    const cpfDigits = onlyDigits(clientDraft.document);
+    const existingByCpf = findClientByCpfDigits(cpfDigits);
     const currentClient = currentClientId ? getClient(currentClientId) : null;
-    const canReuseCurrent = currentClient && (!onlyDigits(currentClient.document) || onlyDigits(currentClient.document) === documentDigits);
-    const target = existingByDocument || (canReuseCurrent ? currentClient : null);
+    const canReuseCurrent = currentClient && (!onlyDigits(currentClient.document) || onlyDigits(currentClient.document) === cpfDigits);
+    const target = existingByCpf || (canReuseCurrent ? currentClient : null);
 
     if (target) {
       const payload = {
@@ -4747,35 +4111,28 @@
     return { ...payload, id };
   }
 
-  function handleRentalDocumentInput() {
-    const documentInput = $("#rentalClientDocument");
-    documentInput.value = formatDocument(documentInput.value);
-    $("#rentalClientId").value = "";
-    setDocumentFeedback($("#clientMatchInfo"));
-  }
-
-  function handleRentalDocumentLookup() {
-    const documentInput = $("#rentalClientDocument");
-    const validation = validateDocument(documentInput.value);
+  function handleRentalCpfLookup() {
+    const cpfInput = $("#rentalClientCpf");
+    const cpfDigits = onlyDigits(cpfInput.value);
     const info = $("#clientMatchInfo");
 
     $("#rentalClientId").value = "";
+    info.textContent = "";
 
-    if (!validation.digits) {
-      setDocumentFeedback(info, "Informe um CPF com 11 dígitos ou um CNPJ com 14 dígitos.", "error");
+    if (!cpfDigits) {
       return;
     }
 
-    if (!validation.valid) {
-      setDocumentFeedback(info, validation.message, "error");
+    if (!isValidCpf(cpfDigits)) {
+      info.textContent = "CPF inválido. Confira os 11 dígitos antes de salvar a locação.";
       return;
     }
 
-    documentInput.value = formatDocument(validation.digits);
-    const client = findClientByDocumentDigits(validation.digits);
+    cpfInput.value = formatCpf(cpfDigits);
+    const client = findClientByCpfDigits(cpfDigits);
 
     if (!client) {
-      setDocumentFeedback(info, `${validation.type} válido. Um novo cliente será criado ao salvar a locação.`, "success");
+      info.textContent = "CPF válido. Um novo cliente será criado ao salvar a locação.";
       return;
     }
 
@@ -4789,30 +4146,7 @@
     if (!$("#rentalClientAddress").value.trim()) {
       $("#rentalClientAddress").value = client.address || "";
     }
-    setDocumentFeedback(info, `Cliente encontrado: ${client.name}`, "success");
-  }
-
-  function validateClientDocumentField(client, showSuccess = false) {
-    const input = $("#clientDocumentInput");
-    const info = $("#clientDocumentInfo");
-    const validation = validateDocument(input.value);
-
-    if (!validation.valid) {
-      setDocumentFeedback(info, validation.message, "error");
-      return null;
-    }
-
-    input.value = formatDocument(validation.digits);
-    const existing = findClientByDocumentDigits(validation.digits);
-    if (existing && Number(existing.id) !== Number(client?.id)) {
-      setDocumentFeedback(info, `${validation.type} já cadastrado para ${existing.name}. Use o cadastro existente para evitar duplicidade.`, "error");
-      return null;
-    }
-
-    if (showSuccess) {
-      setDocumentFeedback(info, `${validation.type} válido.`, "success");
-    }
-    return validation;
+    info.textContent = `Cliente encontrado: ${client.name}`;
   }
 
   function getItem(id) {
@@ -4952,187 +4286,13 @@
     return moneyFormatter.format(toNumber(value));
   }
 
-  function formatMoneyInput(value) {
-    return new Intl.NumberFormat("pt-BR", {
-      maximumFractionDigits: 2,
-    }).format(roundMoney(value));
-  }
-
-  function parseBrazilianMoney(value) {
-    const result = (amount, valid, complete, empty, message = "") => ({
-      value: amount,
-      valid,
-      complete,
-      empty,
-      message,
-    });
-
-    if (typeof value === "number") {
-      if (!Number.isFinite(value)) {
-        return result(0, false, true, false, "Informe um valor numérico válido.");
-      }
-      if (value < 0) {
-        return result(0, false, true, false, "O valor não pode ser negativo.");
-      }
-      return result(value, true, true, false);
-    }
-
-    const raw = String(value ?? "").trim();
-    if (!raw) {
-      return result(0, true, true, true);
-    }
-
-    const normalized = raw.replace(/\s+/g, "");
-    if (normalized.startsWith("-")) {
-      return result(0, false, true, false, "O valor não pode ser negativo.");
-    }
-    if (!/^\d[\d.,]*$/.test(normalized)) {
-      return result(0, false, true, false, "Use apenas números, vírgula ou ponto.");
-    }
-
-    const hasComma = normalized.includes(",");
-    const hasDot = normalized.includes(".");
-    let integerDigits = "";
-    let fractionDigits = "";
-    let complete = true;
-
-    if (hasComma && hasDot) {
-      const decimalSeparator = normalized.lastIndexOf(",") > normalized.lastIndexOf(".") ? "," : ".";
-      const thousandsSeparator = decimalSeparator === "," ? "." : ",";
-      const decimalIndex = normalized.lastIndexOf(decimalSeparator);
-      const integerPart = normalized.slice(0, decimalIndex);
-      fractionDigits = normalized.slice(decimalIndex + 1);
-      const groupingPattern = thousandsSeparator === "." ? /^\d{1,3}(?:\.\d{3})+$/ : /^\d{1,3}(?:,\d{3})+$/;
-
-      if (
-        integerPart.includes(decimalSeparator) ||
-        (fractionDigits && /[.,]/.test(fractionDigits)) ||
-        (!/^\d+$/.test(integerPart) && !groupingPattern.test(integerPart))
-      ) {
-        return result(0, false, true, false, "Use um formato de moeda válido, como 1.234,56.");
-      }
-      integerDigits = integerPart.split(thousandsSeparator).join("");
-    } else if (hasComma) {
-      const parts = normalized.split(",");
-      if (parts.length !== 2 || !/^\d+$/.test(parts[0])) {
-        return result(0, false, true, false, "Use um formato de moeda válido, como 2,50.");
-      }
-      [integerDigits, fractionDigits] = parts;
-    } else if (hasDot) {
-      const parts = normalized.split(".");
-      const groupingPattern = /^\d{1,3}(?:\.\d{3})+$/;
-      if (parts.length === 2 && parts[1].length <= 2 && /^\d+$/.test(parts[0])) {
-        [integerDigits, fractionDigits] = parts;
-      } else if (groupingPattern.test(normalized)) {
-        integerDigits = normalized.replace(/\./g, "");
-      } else {
-        return result(0, false, true, false, "Use no máximo duas casas decimais.");
-      }
-    } else {
-      integerDigits = normalized;
-    }
-
-    if (!integerDigits || !/^\d+$/.test(integerDigits)) {
-      return result(0, false, true, false, "Informe um valor numérico válido.");
-    }
-    if (fractionDigits.length > 2) {
-      return result(0, false, true, false, "Use no máximo duas casas decimais.");
-    }
-    if (!fractionDigits && (normalized.endsWith(",") || normalized.endsWith("."))) {
-      complete = false;
-    }
-
-    const amount = Number(fractionDigits ? `${integerDigits}.${fractionDigits}` : integerDigits);
-    if (!Number.isFinite(amount)) {
-      return result(0, false, true, false, "Informe um valor numérico válido.");
-    }
-    return result(amount, true, complete, false);
-  }
-
-  function updateMoneyFieldValidity(input, normalizeValue = false) {
-    const parsed = parseBrazilianMoney(input?.value);
-    if (!input) {
-      return parsed;
-    }
-
-    if (!parsed.valid) {
-      input.setCustomValidity(parsed.message);
-    } else if (!parsed.complete) {
-      input.setCustomValidity("Finalize o valor com até duas casas decimais.");
-    } else {
-      input.setCustomValidity("");
-      if (normalizeValue && !parsed.empty) {
-        input.value = formatMoneyInput(parsed.value);
-      }
-    }
-    return parsed;
-  }
-
-  function bindMoneyInput(input, onChange = null) {
-    if (!input) {
-      return;
-    }
-
-    input.addEventListener("input", () => {
-      const parsed = updateMoneyFieldValidity(input);
-      onChange?.(parsed);
-    });
-    input.addEventListener("blur", () => {
-      const parsed = updateMoneyFieldValidity(input, true);
-      onChange?.(parsed);
-    });
-  }
-
-  function validateMoneyField(input, label, options = {}) {
-    const parsed = updateMoneyFieldValidity(input, true);
-    const isRequired = options.required === true;
-    if (!parsed.valid || !parsed.complete || (isRequired && parsed.value <= 0)) {
-      const detail = !parsed.valid
-        ? parsed.message
-        : !parsed.complete
-          ? "Finalize o valor com até duas casas decimais."
-          : "Informe um valor maior que zero.";
-      input?.focus();
-      alert(`${label}: ${detail}`);
-      return null;
-    }
-    return roundMoney(parsed.value);
-  }
-
-  function validateMoneyFields(fields) {
-    for (const field of fields) {
-      if (validateMoneyField(field.input, field.label, field.options) === null) {
-        return false;
-      }
-    }
-    return true;
-  }
-
   function toNumber(value) {
-    const parsed = parseBrazilianMoney(value);
-    return parsed.valid ? parsed.value : 0;
-  }
-
-  function toWholeNumber(value, fallback = 0) {
-    const normalized = String(value ?? "").trim().replace(",", ".");
-    if (!normalized) {
-      return fallback;
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : 0;
     }
 
-    const parsed = Number(normalized);
-    return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
-  }
-
-  function getItemMaintenanceQty(item) {
-    return Math.max(0, toWholeNumber(item?.maintenanceQty, 0));
-  }
-
-  function getItemBrokenQty(item) {
-    return Math.max(0, toWholeNumber(item?.brokenQty, 0));
-  }
-
-  function getItemLostQty(item) {
-    return Math.max(0, toWholeNumber(item?.lostQty, 0));
+    const parsed = Number(String(value ?? "").replace(",", "."));
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   function roundMoney(value) {
@@ -5143,90 +4303,13 @@
     return String(value || "").replace(/\D/g, "");
   }
 
-  function formatDocument(value) {
-    const digits = onlyDigits(value).slice(0, 14);
-    if (!digits) {
-      return "";
-    }
-
-    if (digits.length <= 11) {
-      const parts = [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6, 9), digits.slice(9, 11)];
-      let formatted = parts[0];
-      if (parts[1]) formatted += `.${parts[1]}`;
-      if (parts[2]) formatted += `.${parts[2]}`;
-      if (parts[3]) formatted += `-${parts[3]}`;
-      return formatted;
-    }
-
-    const parts = [digits.slice(0, 2), digits.slice(2, 5), digits.slice(5, 8), digits.slice(8, 12), digits.slice(12, 14)];
-    let formatted = parts[0];
-    if (parts[1]) formatted += `.${parts[1]}`;
-    if (parts[2]) formatted += `.${parts[2]}`;
-    if (parts[3]) formatted += `/${parts[3]}`;
-    if (parts[4]) formatted += `-${parts[4]}`;
-    return formatted;
-  }
-
-  function getDocumentLabel(value) {
+  function formatCpf(value) {
     const digits = onlyDigits(value);
-    if (digits.length === 11) {
-      return "CPF";
-    }
-    if (digits.length === 14) {
-      return "CNPJ";
-    }
-    return "Documento";
-  }
-
-  function validateDocument(value) {
-    const digits = onlyDigits(value);
-    const type = getDocumentLabel(digits);
-
-    if (digits.length === 11) {
-      const valid = isValidCpf(digits);
-      return {
-        digits,
-        type,
-        valid,
-        message: valid
-          ? ""
-          : "CPF inválido. Confira os 11 dígitos e os dígitos verificadores.",
-      };
+    if (digits.length !== 11) {
+      return digits;
     }
 
-    if (digits.length === 14) {
-      const valid = isValidCnpj(digits);
-      return {
-        digits,
-        type,
-        valid,
-        message: valid
-          ? ""
-          : "CNPJ inválido. Confira os 14 dígitos e os dígitos verificadores.",
-      };
-    }
-
-    return {
-      digits,
-      type: "",
-      valid: false,
-      message: "Informe um CPF com 11 dígitos ou um CNPJ com 14 dígitos.",
-    };
-  }
-
-  function setDocumentFeedback(element, message = "", variant = "") {
-    if (!element) {
-      return;
-    }
-
-    element.textContent = message;
-    element.classList.remove("is-error", "is-success");
-    if (variant === "error") {
-      element.classList.add("is-error");
-    }
-    if (variant === "success") {
-      element.classList.add("is-success");
-    }
+    return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
   }
 
   function isValidCpf(value) {
@@ -5257,27 +4340,6 @@
     }
 
     return secondDigit === Number(cpf[10]);
-  }
-
-  function isValidCnpj(value) {
-    const cnpj = onlyDigits(value);
-    if (cnpj.length !== 14 || /^(\d)\1{13}$/.test(cnpj)) {
-      return false;
-    }
-
-    const calculateDigit = (base, weights) => {
-      const sum = base.split("").reduce((total, digit, index) => total + Number(digit) * weights[index], 0);
-      const remainder = sum % 11;
-      return remainder < 2 ? 0 : 11 - remainder;
-    };
-
-    const firstDigit = calculateDigit(cnpj.slice(0, 12), [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
-    if (firstDigit !== Number(cnpj[12])) {
-      return false;
-    }
-
-    const secondDigit = calculateDigit(cnpj.slice(0, 13), [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
-    return secondDigit === Number(cnpj[13]);
   }
 
   function normalize(value) {
