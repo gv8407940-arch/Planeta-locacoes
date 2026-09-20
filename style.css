@@ -1198,6 +1198,14 @@ textarea:focus {
   border: 0;
 }
 
+.contract-print-root {
+  position: fixed;
+  top: 0;
+  left: -100000px;
+  width: 210mm;
+  pointer-events: none;
+}
+
 .close-btn {
   width: 38px;
   height: 38px;
@@ -1477,6 +1485,11 @@ body.menu-open {
     inset: 0 auto auto 0;
     width: 100%;
     padding: 0;
+  }
+
+  .contract-print-root {
+    position: static;
+    width: auto;
   }
 
   .modal-backdrop {

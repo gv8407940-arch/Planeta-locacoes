@@ -37,7 +37,7 @@
     "6m": { label: "últimos 6 meses", months: 6 },
     "12m": { label: "últimos 12 meses", months: 12 },
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=29";
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=30";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -2632,7 +2632,9 @@
 
       const frame = $("#contractPreviewFrame");
       frame.srcdoc = contractHtml;
-      $("#printReceiptBtn").addEventListener("click", () => printContractFrame(frame));
+      // iOS em modo instalado falha com frequencia ao imprimir o conteudo de um iframe.
+      // O contrato e impresso no documento principal, no mesmo gesto do toque.
+      $("#printReceiptBtn").addEventListener("click", () => printOfficialContract(contractHtml));
       $("#shareReceiptBtn").addEventListener("click", () => shareReceipt(rental, client));
     } catch (error) {
       console.error(error);
@@ -2784,14 +2786,46 @@
       `;
   }
 
-  function printContractFrame(frame) {
-    if (!frame?.contentWindow) {
-      alert("A prévia do contrato ainda não carregou. Tente novamente em alguns segundos.");
-      return;
-    }
+  function buildContractPrintMarkup(contractHtml) {
+    const documentTemplate = new DOMParser().parseFromString(contractHtml, "text/html");
+    const bodyClasses = documentTemplate.body.className || "";
+    const templateStyles = Array.from(documentTemplate.head.querySelectorAll("style"))
+      .map((style) => style.textContent || "")
+      // O HTML oficial sera inserido dentro da pagina do app. Escopa o body do
+      // template para nao alterar a interface enquanto a tela de impressao existe.
+      .map((css) => css.replace(/\bbody\b/g, ".contract-print-document"))
+      .join("\n");
 
-    frame.contentWindow.focus();
-    frame.contentWindow.print();
+    return `
+      <style>${templateStyles}</style>
+      <div class="contract-print-document ${escapeAttr(bodyClasses)}">
+        ${documentTemplate.body.innerHTML}
+      </div>
+    `;
+  }
+
+  function printOfficialContract(contractHtml) {
+    document.querySelector("#contractPrintArea")?.remove();
+
+    const printRoot = document.createElement("div");
+    printRoot.id = "contractPrintArea";
+    printRoot.className = "print-area contract-print-root";
+    printRoot.innerHTML = buildContractPrintMarkup(contractHtml);
+    document.body.appendChild(printRoot);
+
+    // Forca o navegador a calcular o layout A4 antes de abrir a folha de impressao.
+    // Isto evita paginas brancas em WebKit ao imprimir logo apos criar o contrato.
+    void printRoot.getBoundingClientRect();
+
+    window.addEventListener(
+      "afterprint",
+      () => {
+        printRoot.remove();
+      },
+      { once: true }
+    );
+
+    window.print();
   }
 
   async function shareReceipt(rental, client) {
