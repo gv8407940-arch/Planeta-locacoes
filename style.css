@@ -844,6 +844,66 @@ textarea:focus {
   font-weight: 800;
 }
 
+.receivables-list {
+  grid-template-columns: 1fr;
+}
+
+.receivable-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 92px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.receivable-card h3,
+.receivable-card p {
+  margin: 0;
+}
+
+.receivable-card h3 {
+  color: var(--blue-dark);
+  font-size: 1.05rem;
+}
+
+.receivable-card p {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.receivable-amount {
+  flex: 0 0 auto;
+  min-width: 126px;
+  padding: 9px;
+  color: var(--red-dark);
+  background: var(--danger-soft);
+  border: 1px solid #f1c5cb;
+  border-radius: 8px;
+  text-align: right;
+}
+
+.receivable-amount span,
+.receivable-amount strong {
+  display: block;
+}
+
+.receivable-amount span {
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.receivable-amount strong {
+  margin-top: 2px;
+  font-size: 1rem;
+}
+
 .rental-detail-modal {
   display: grid;
   gap: 12px;
@@ -1431,6 +1491,16 @@ body.menu-open {
 
   .metric-grid {
     grid-template-columns: 1fr;
+  }
+
+  .receivable-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .receivable-amount {
+    width: 100%;
+    text-align: left;
   }
 
   .detail-grid {

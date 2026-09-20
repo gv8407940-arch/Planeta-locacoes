@@ -37,7 +37,7 @@
     "6m": { label: "últimos 6 meses", months: 6 },
     "12m": { label: "últimos 12 meses", months: 12 },
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=32";
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=33";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -168,6 +168,8 @@
     $("#clientsList").addEventListener("click", handleClientClick);
     $("#rentalsList").addEventListener("click", handleRentalClick);
     $("#rentalsList").addEventListener("keydown", handleRentalKeydown);
+    $("#receivablesList").addEventListener("click", handleReceivableClick);
+    $("#receivablesList").addEventListener("keydown", handleReceivableKeydown);
     $("#expenseList").addEventListener("click", handleExpenseClick);
     $("#financeList").addEventListener("click", handleFinanceClick);
 
@@ -331,6 +333,7 @@
     renderClients();
     renderRentalItemsEditor();
     renderRentals();
+    renderReceivables();
     renderExpenseFilters();
     renderExpenses();
     renderFinanceFilters();
@@ -347,6 +350,9 @@
     }
     if (viewName === "finance") {
       renderFinance();
+    }
+    if (viewName === "receivables") {
+      renderReceivables();
     }
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -515,9 +521,8 @@
     const scheduleEntries = getScheduleEntries(3);
     const upcomingStarts = scheduleEntries.filter((entry) => entry.actionType === "start").length;
     const upcomingEnds = scheduleEntries.filter((entry) => entry.actionType === "end").length;
-    const receivable = state.rentals
-      .filter((rental) => !["returned", "cancelled"].includes(rental.status) && rental.paymentStatus !== "paid")
-      .reduce((sum, rental) => sum + getRentalTotals(rental).remaining, 0);
+    const receivable = getPendingRentals()
+      .reduce((sum, rental) => sum + getRentalReceivableAmount(rental), 0);
     const availableUnits = state.items.reduce((sum, item) => sum + getItemAvailabilityForPeriod(item, startDate, endDate).available, 0);
 
     $("#dashboardStats").innerHTML = [
@@ -1333,6 +1338,12 @@
       rental.orderNumber = existing.orderNumber;
       rental.createdAt = existing.createdAt;
       rental.returnProblems = existing.returnProblems || [];
+      rental.paymentReceivedAt = rental.paymentStatus === "paid" ? existing.paymentReceivedAt || now : "";
+      rental.paymentReopenedAt = rental.paymentStatus === "paid"
+        ? existing.paymentReopenedAt || ""
+        : existing.paymentStatus === "paid"
+          ? now
+          : existing.paymentReopenedAt || "";
       rental.updatedAt = now;
       await PlanetaDB.put("rentals", rental);
       showToast(`Locação ${rental.orderNumber} atualizada.`);
@@ -1342,6 +1353,8 @@
       rental.createdAt = now;
       rental.updatedAt = now;
       rental.returnProblems = [];
+      rental.paymentReceivedAt = rental.paymentStatus === "paid" ? now : "";
+      rental.paymentReopenedAt = "";
       await PlanetaDB.add("rentals", rental);
       showToast(`Locação ${rental.orderNumber} salva como ${statusLabel(rental.status)}.`);
     }
@@ -1513,6 +1526,132 @@
     `;
   }
 
+  function getPendingRentals() {
+    return sortRentalsByDateDesc(state.rentals.filter(isRentalReceivable));
+  }
+
+  function isRentalReceivable(rental) {
+    if (!rental || ["quote", "cancelled"].includes(rental.status)) {
+      return false;
+    }
+
+    const paymentStatus = rental.paymentStatus || "unpaid";
+    return ["unpaid", "partial"].includes(paymentStatus) && getRentalReceivableAmount(rental) > 0;
+  }
+
+  function renderReceivables() {
+    const rentals = getPendingRentals();
+    const total = rentals.reduce((sum, rental) => sum + getRentalReceivableAmount(rental), 0);
+
+    $("#receivablesStats").innerHTML = [
+      ["Total geral a receber", formatMoney(total)],
+      ["Locações pendentes", rentals.length],
+    ]
+      .map(([label, value]) => `<article class="kpi-card"><span>${label}</span><strong>${value}</strong></article>`)
+      .join("");
+
+    $("#receivablesList").innerHTML = rentals.length
+      ? rentals.map(renderReceivableCard).join("")
+      : emptyState("Nenhum pagamento pendente.");
+  }
+
+  function renderReceivableCard(rental) {
+    const client = getClient(rental.clientId);
+    return `
+      <article class="receivable-card clickable-item" role="button" tabindex="0" data-receivable-id="${rental.id}">
+        <div>
+          <h3>${escapeHtml(client?.name || "Cliente não encontrado")}</h3>
+          <p>Entrega: ${formatDate(rental.startDate)}</p>
+          <p>Devolução: ${formatDate(rental.endDate)}</p>
+        </div>
+        <div class="receivable-amount">
+          <span>Restante a receber</span>
+          <strong>${formatMoney(getRentalReceivableAmount(rental))}</strong>
+        </div>
+      </article>
+    `;
+  }
+
+  function renderReceivableDetailsContent(rental) {
+    const client = getClient(rental.clientId);
+    const totals = getRentalTotals(rental);
+    const items = (rental.items || [])
+      .map((line) => `${escapeHtml(line.qty)}x ${escapeHtml(line.name)} (${formatMoney(line.unitPrice)})`)
+      .join("<br>");
+
+    return `
+      <div class="rental-detail-modal receivable-detail-modal">
+        <section class="detail-section">
+          <h4>Dados do cliente</h4>
+          <div class="detail-grid">
+            <div class="metric"><span>Nome</span><strong>${escapeHtml(client?.name || "-")}</strong></div>
+            <div class="metric"><span>CPF/CNPJ</span><strong>${escapeHtml(client?.document || "-")}</strong></div>
+            <div class="metric"><span>Telefone</span><strong>${escapeHtml(client?.phone || "-")}</strong></div>
+            <div class="metric"><span>Endereço</span><strong>${escapeHtml(client?.address || "-")}</strong></div>
+          </div>
+        </section>
+
+        <section class="detail-section">
+          <h4>Locação</h4>
+          <div class="detail-grid">
+            <div class="metric"><span>Data de entrega</span><strong>${formatDate(rental.startDate)}</strong></div>
+            <div class="metric"><span>Data de devolução</span><strong>${formatDate(rental.endDate)}</strong></div>
+            <div class="metric"><span>Status da locação</span><strong>${statusLabel(rental.status)}</strong></div>
+            <div class="metric"><span>Local</span><strong>${escapeHtml(rental.eventLocation || "-")}</strong></div>
+          </div>
+        </section>
+
+        <section class="detail-section">
+          <h4>Valores e pagamento</h4>
+          <div class="metric-grid">
+            <div class="metric"><span>Subtotal</span><strong>${formatMoney(totals.subtotal)}</strong></div>
+            <div class="metric"><span>Desconto</span><strong>${formatMoney(totals.discount)}</strong></div>
+            <div class="metric"><span>Frete</span><strong>${formatMoney(totals.freight)}</strong></div>
+            <div class="metric"><span>Total final</span><strong>${formatMoney(totals.total)}</strong></div>
+            <div class="metric"><span>Sinal</span><strong>${formatMoney(totals.deposit)}</strong></div>
+            <div class="metric"><span>Restante</span><strong>${formatMoney(getRentalReceivableAmount(rental))}</strong></div>
+            <div class="metric"><span>Forma de pagamento</span><strong>${escapeHtml(rental.paymentMethod || "-")}</strong></div>
+            <div class="metric"><span>Status do pagamento</span><strong>${PAYMENT_STATUS[rental.paymentStatus] || PAYMENT_STATUS.unpaid}</strong></div>
+          </div>
+        </section>
+
+        <section class="detail-section">
+          <h4>Itens alugados</h4>
+          <p class="muted-text">${items || "Sem itens"}</p>
+        </section>
+
+        ${rental.notes ? `<section class="detail-section"><h4>Observações</h4><p class="muted-text">${escapeHtml(rental.notes)}</p></section>` : ""}
+
+        <div class="card-actions rental-detail-actions receivable-detail-actions">
+          <button class="primary-action" type="button" data-action="mark-payment-received">Marcar como recebido</button>
+          <button class="secondary-action" type="button" data-action="open-full-rental">Abrir locação completa</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function openReceivableDetailsModal(rental) {
+    openModal("Pagamento pendente", renderReceivableDetailsContent(rental));
+    $(".receivable-detail-actions", $("#modalRoot")).addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button) {
+        return;
+      }
+
+      if (button.dataset.action === "mark-payment-received") {
+        const received = await markRentalPaymentReceived(rental);
+        if (received) {
+          closeModal();
+        }
+        return;
+      }
+
+      if (button.dataset.action === "open-full-rental") {
+        openRentalDetailsModal(getRental(rental.id) || rental);
+      }
+    });
+  }
+
   function renderRentalCard(rental) {
     const client = getClient(rental.clientId);
     const totals = getRentalTotals(rental);
@@ -1629,6 +1768,15 @@
           </div>
         </section>
 
+        <section class="detail-section">
+          <h4>Pagamento</h4>
+          <div class="detail-grid">
+            <div class="metric"><span>Forma</span><strong>${escapeHtml(rental.paymentMethod || "-")}</strong></div>
+            <div class="metric"><span>Status</span><strong>${PAYMENT_STATUS[rental.paymentStatus] || PAYMENT_STATUS.unpaid}</strong></div>
+            ${rental.paymentReceivedAt ? `<div class="metric"><span>Recebido em</span><strong>${formatReceivedDate(rental.paymentReceivedAt)}</strong></div>` : ""}
+          </div>
+        </section>
+
         ${rental.dailyPricing?.enabled ? `<p class="muted-text"><strong>Cobranca por dias ativa:</strong> subtotal ${formatMoney(totals.subtotal)}</p>` : ""}
         ${kitSummary.length ? `<p class="muted-text"><strong>Conjuntos:</strong><br>${kitSummary.map((line) => `${escapeHtml(line.qty)}x ${escapeHtml(line.name)}`).join("<br>")}</p>` : ""}
         <p class="muted-text"><strong>Itens alugados:</strong><br>${items || "Sem itens"}</p>
@@ -1641,6 +1789,7 @@
           <button type="button" data-action="mark-delivered" data-id="${rental.id}">Marcar entregue</button>
           <button type="button" data-action="mark-returned" data-id="${rental.id}">Marcar devolvida</button>
           <button type="button" data-action="cancel-rental" data-id="${rental.id}">Cancelar</button>
+          ${rental.paymentStatus === "paid" && !["quote", "cancelled"].includes(rental.status) ? `<button type="button" data-action="reopen-payment" data-id="${rental.id}">Reabrir pendência</button>` : ""}
           <button type="button" class="danger-mini" data-action="delete-rental" data-id="${rental.id}">Excluir</button>
         </div>
       </div>
@@ -1978,6 +2127,18 @@
     }
   }
 
+  function handleReceivableClick(event) {
+    const receivableElement = event.target.closest("[data-receivable-id]");
+    if (!receivableElement) {
+      return;
+    }
+
+    const rental = getRental(Number(receivableElement.dataset.receivableId));
+    if (rental && isRentalReceivable(rental)) {
+      openReceivableDetailsModal(rental);
+    }
+  }
+
   async function handleRentalAction(action, rental, fromModal = false) {
     if (action === "edit-rental") {
       if (fromModal) {
@@ -1996,6 +2157,11 @@
     } else if (action === "cancel-rental") {
       await cancelRental(rental);
       if (fromModal) {
+        closeModal();
+      }
+    } else if (action === "reopen-payment") {
+      const reopened = await reopenRentalPayment(rental);
+      if (reopened && fromModal) {
         closeModal();
       }
     } else if (action === "delete-rental") {
@@ -2020,6 +2186,23 @@
     const rental = getRental(Number(rentalElement.dataset.rentalId));
     if (rental) {
       openRentalDetailsModal(rental);
+    }
+  }
+
+  function handleReceivableKeydown(event) {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+
+    const receivableElement = event.target.closest("[data-receivable-id]");
+    if (!receivableElement) {
+      return;
+    }
+
+    event.preventDefault();
+    const rental = getRental(Number(receivableElement.dataset.receivableId));
+    if (rental && isRentalReceivable(rental)) {
+      openReceivableDetailsModal(rental);
     }
   }
 
@@ -2192,6 +2375,56 @@
       refreshAll();
       showToast("Pedido cancelado.");
     }
+  }
+
+  async function markRentalPaymentReceived(rental) {
+    if (!isRentalReceivable(rental)) {
+      alert("Esta locação não possui pagamento pendente.");
+      return false;
+    }
+
+    const remaining = getRentalReceivableAmount(rental);
+    const clientName = getClient(rental.clientId)?.name || "este cliente";
+    if (!confirm(`Confirmar o recebimento de ${formatMoney(remaining)} de ${clientName}?`)) {
+      return false;
+    }
+
+    const now = new Date().toISOString();
+    await PlanetaDB.put("rentals", {
+      ...rental,
+      paymentStatus: "paid",
+      paymentReceivedAt: now,
+      updatedAt: now,
+    });
+    await loadAll();
+    refreshAll();
+    showToast("Pagamento marcado como recebido.");
+    return true;
+  }
+
+  async function reopenRentalPayment(rental) {
+    if (rental.paymentStatus !== "paid") {
+      return false;
+    }
+
+    const paymentStatus = getRentalTotals(rental).deposit > 0 ? "partial" : "unpaid";
+    const label = PAYMENT_STATUS[paymentStatus];
+    if (!confirm(`Reabrir a pendência desta locação como \"${label}\"?`)) {
+      return false;
+    }
+
+    const now = new Date().toISOString();
+    await PlanetaDB.put("rentals", {
+      ...rental,
+      paymentStatus,
+      paymentReceivedAt: "",
+      paymentReopenedAt: now,
+      updatedAt: now,
+    });
+    await loadAll();
+    refreshAll();
+    showToast(`Pendência reaberta como ${label}.`);
+    return true;
   }
 
   async function deleteRental(rental) {
@@ -3603,6 +3836,15 @@
   function getRentalReceivableAmount(rental) {
     const totals = getRentalTotals(rental);
     return Math.max(0, roundMoney(totals.total - getRentalReceivedAmount(rental)));
+  }
+
+  function formatReceivedDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return formatDate(String(value || "").slice(0, 10));
+    }
+
+    return date.toLocaleDateString("pt-BR");
   }
 
   function isMovementInFinanceFilters(movement, period = getFinancePeriod()) {
