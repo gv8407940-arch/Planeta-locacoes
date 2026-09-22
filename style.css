@@ -453,6 +453,51 @@ main {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.payment-timeline {
+  display: grid;
+  gap: 8px;
+}
+
+.payment-timeline-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  background: #f7f9fc;
+  border: 1px solid #e0e8f2;
+  border-radius: 8px;
+}
+
+.payment-timeline-item span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.payment-timeline-value {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.payment-timeline-value button {
+  min-height: 30px;
+  padding: 3px 7px;
+  color: var(--blue-dark);
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-weight: 800;
+  font-size: 0.75rem;
+}
+
+.legacy-payment {
+  background: #fff8e8;
+  border-color: #f0d494;
+}
+
 .availability-panel {
   margin-top: 0;
 }

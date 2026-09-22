@@ -10,13 +10,13 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="format-detection" content="telephone=no">
   <title>Planeta Locações</title>
-  <link rel="manifest" href="manifest.json?v=33">
+  <link rel="manifest" href="manifest.json?v=35">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
-  <link rel="stylesheet" href="style.css?v=33">
+  <link rel="stylesheet" href="style.css?v=35">
 </head>
 <body>
   <div class="app-shell">
@@ -50,6 +50,7 @@
         <button class="nav-btn" type="button" data-view="rentals">Locações</button>
         <button class="nav-btn" type="button" data-view="receivables">A Receber</button>
         <button class="nav-btn" type="button" data-view="expenses">Gastos</button>
+        <button class="nav-btn" type="button" data-view="payment-review">Revisar pagamentos</button>
         <button class="nav-btn" type="button" data-view="finance">Relatório Financeiro</button>
         <button class="nav-btn" type="button" data-view="backup">Backup</button>
       </nav>
@@ -197,8 +198,8 @@
               </label>
 
               <label>
-                CPF
-                <input id="rentalClientCpf" type="text" required inputmode="numeric" autocomplete="off" placeholder="000.000.000-00">
+                CPF ou CNPJ
+                <input id="rentalClientCpf" type="text" required inputmode="numeric" autocomplete="off" placeholder="000.000.000-00 ou 00.000.000/0000-00">
               </label>
 
               <label>
@@ -403,6 +404,7 @@
           <div class="badge-row">
             <button id="newExpenseBtn" class="secondary-action" type="button">Cadastrar gasto</button>
             <button id="newInstallmentBtn" class="primary-action" type="button">Cadastrar parcelas</button>
+            <button id="newSupplierOffsetBtn" class="secondary-action" type="button">Venda com abatimento</button>
           </div>
         </div>
 
@@ -426,6 +428,7 @@
             <select id="expenseStatusFilter">
               <option value="">Todos</option>
               <option value="paid">Pago</option>
+              <option value="partial">Parcialmente pago</option>
               <option value="pending">Pendente</option>
               <option value="overdue">Atrasado</option>
               <option value="installment">Parcelado</option>
@@ -438,6 +441,20 @@
         </div>
 
         <div id="expenseList" class="data-list rentals-list"></div>
+      </section>
+
+      <section id="view-payment-review" class="view" aria-labelledby="paymentReviewTitle">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Histórico financeiro local</p>
+            <h2 id="paymentReviewTitle">Revisar pagamentos</h2>
+          </div>
+        </div>
+        <section class="panel">
+          <p class="muted-text">Registros antigos continuam intactos. Aqui você pode transformar pagamentos antigos em lançamentos editáveis e conferir abatimentos comerciais vinculados a fornecedores.</p>
+        </section>
+        <div id="paymentReviewStats" class="kpi-grid"></div>
+        <div id="paymentReviewList" class="data-list rentals-list"></div>
       </section>
 
       <section id="view-finance" class="view" aria-labelledby="financeTitle">
@@ -517,6 +534,7 @@
               <option value="paid-expense">Gasto pago</option>
               <option value="pending-expense">Gasto pendente</option>
               <option value="future-expense">Gasto futuro</option>
+              <option value="supplier-offset">Abatimento ao fornecedor</option>
             </select>
           </label>
           <label>
@@ -605,8 +623,8 @@
   <div id="modalRoot"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="jspdf.umd.min.js?v=33"></script>
-  <script src="db.js?v=33"></script>
-  <script src="app.js?v=33"></script>
+  <script src="jspdf.umd.min.js?v=35"></script>
+  <script src="db.js?v=35"></script>
+  <script src="app.js?v=35"></script>
 </body>
 </html>

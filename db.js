@@ -4,8 +4,8 @@
   const DB_NAME = "planeta-locacoes";
   // Mantem compatibilidade com os dados criados pelas versoes mais recentes do app.
   // Nenhuma store existente e removida ou alterada por esta atualizacao.
-  const DB_VERSION = 5;
-  const STORES = ["items", "clients", "rentals", "expenses", "kits", "meta"];
+  const DB_VERSION = 6;
+  const STORES = ["items", "clients", "rentals", "expenses", "payments", "kits", "meta"];
 
   function open() {
     return new Promise((resolve, reject) => {
@@ -57,6 +57,20 @@
           store.createIndex("date", "date", { unique: false });
           store.createIndex("dueDate", "dueDate", { unique: false });
           store.createIndex("seriesId", "seriesId", { unique: false });
+        }
+
+        // Registra pagamentos reais e compensações comerciais sem alterar os
+        // registros originais de gastos, parcelas ou locações.
+        if (!db.objectStoreNames.contains("payments")) {
+          const store = db.createObjectStore("payments", {
+            keyPath: "id",
+            autoIncrement: true,
+          });
+          store.createIndex("recordType", "recordType", { unique: false });
+          store.createIndex("recordId", "recordId", { unique: false });
+          store.createIndex("recordKey", "recordKey", { unique: false });
+          store.createIndex("kind", "kind", { unique: false });
+          store.createIndex("date", "date", { unique: false });
         }
 
         if (!db.objectStoreNames.contains("kits")) {
@@ -221,8 +235,9 @@
     const clientIdMap = await mergeClients(data.stores.clients || []);
     const itemIdMap = await mergeItems(data.stores.items || []);
     await mergeKits(data.stores.kits || [], itemIdMap);
-    await mergeRentals(data.stores.rentals || [], clientIdMap, itemIdMap);
-    await mergeExpenses(data.stores.expenses || []);
+    const rentalIdMap = await mergeRentals(data.stores.rentals || [], clientIdMap, itemIdMap);
+    const expenseIdMap = await mergeExpenses(data.stores.expenses || []);
+    await mergePayments(data.stores.payments || [], rentalIdMap, expenseIdMap, itemIdMap);
     await setMeta("lastMergedBackupAt", new Date().toISOString());
   }
 
@@ -270,6 +285,7 @@
 
   async function mergeRentals(records, clientIdMap, itemIdMap) {
     const existing = await getAll("rentals");
+    const idMap = new Map();
 
     for (const record of Array.isArray(records) ? records : []) {
       const payload = {
@@ -285,13 +301,18 @@
       delete payload.id;
 
       const duplicate = existing.some((rental) => rentalKey(rental) === rentalKey(payload));
-      if (duplicate) {
+      const duplicateRecord = existing.find((rental) => rentalKey(rental) === rentalKey(payload));
+      if (duplicateRecord) {
+        idMap.set(record.id, duplicateRecord.id);
         continue;
       }
 
       const id = await add("rentals", payload);
+      idMap.set(record.id, id);
       existing.push({ ...payload, id });
     }
+
+    return idMap;
   }
 
   async function mergeKits(records, itemIdMap) {
@@ -321,16 +342,52 @@
 
   async function mergeExpenses(records) {
     const existing = await getAll("expenses");
+    const idMap = new Map();
 
     for (const record of Array.isArray(records) ? records : []) {
       const duplicate = existing.some((expense) => expenseKey(expense) === expenseKey(record));
-      if (duplicate) {
+      const duplicateRecord = existing.find((expense) => expenseKey(expense) === expenseKey(record));
+      if (duplicateRecord) {
+        idMap.set(record.id, duplicateRecord.id);
         continue;
       }
 
       const payload = { ...record };
       delete payload.id;
       const id = await add("expenses", payload);
+      idMap.set(record.id, id);
+      existing.push({ ...payload, id });
+    }
+
+    return idMap;
+  }
+
+  async function mergePayments(records, rentalIdMap, expenseIdMap, itemIdMap) {
+    const existing = await getAll("payments");
+
+    for (const record of Array.isArray(records) ? records : []) {
+      const recordId = record.recordType === "rental"
+        ? (rentalIdMap.get(record.recordId) || record.recordId)
+        : (expenseIdMap.get(record.recordId) || record.recordId);
+      const payload = {
+        ...record,
+        recordId,
+        recordKey: `${record.recordType}:${recordId}`,
+        inventoryLines: Array.isArray(record.inventoryLines)
+          ? record.inventoryLines.map((line) => ({
+              ...line,
+              itemId: itemIdMap.get(line.itemId) || line.itemId,
+            }))
+          : [],
+      };
+      delete payload.id;
+
+      const duplicate = existing.some((payment) => paymentKey(payment) === paymentKey(payload));
+      if (duplicate) {
+        continue;
+      }
+
+      const id = await add("payments", payload);
       existing.push({ ...payload, id });
     }
   }
@@ -364,6 +421,10 @@
 
   function expenseKey(expense) {
     return `${normalizeKey(expense?.description)}|${expense?.date || expense?.dueDate || ""}|${Number(expense?.amount) || 0}|${expense?.seriesId || ""}|${expense?.installmentNumber || ""}`;
+  }
+
+  function paymentKey(payment) {
+    return `${payment?.recordType}|${payment?.recordId}|${payment?.kind}|${payment?.date}|${Number(payment?.amount) || 0}|${normalizeKey(payment?.notes)}|${payment?.createdAt || ""}`;
   }
 
   function onlyDigits(value) {

@@ -16,6 +16,7 @@
   };
   const EXPENSE_STATUS = {
     paid: "Pago",
+    partial: "Parcialmente pago",
     pending: "Pendente",
     overdue: "Atrasado",
     installment: "Parcelado",
@@ -30,6 +31,7 @@
     "paid-expense": "Gasto pago",
     "pending-expense": "Gasto pendente",
     "future-expense": "Gasto futuro",
+    "supplier-offset": "Abatimento ao fornecedor",
   };
   const FINANCE_PERIOD_PRESETS = {
     "30d": { label: "último mês", days: 30 },
@@ -37,7 +39,7 @@
     "6m": { label: "últimos 6 meses", months: 6 },
     "12m": { label: "últimos 12 meses", months: 12 },
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=33";
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=35";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -57,6 +59,7 @@
     clients: [],
     rentals: [],
     expenses: [],
+    payments: [],
     kits: [],
     currentRentalItems: [],
     editingRentalId: null,
@@ -172,6 +175,7 @@
     $("#receivablesList").addEventListener("keydown", handleReceivableKeydown);
     $("#expenseList").addEventListener("click", handleExpenseClick);
     $("#financeList").addEventListener("click", handleFinanceClick);
+    $("#paymentReviewList").addEventListener("click", handlePaymentReviewClick);
 
     $("#rentalForm").addEventListener("submit", (event) => {
       event.preventDefault();
@@ -196,6 +200,8 @@
     $("#rentalEndDate").addEventListener("change", handleRentalDateChange);
     $("#rentalClientCpf").addEventListener("blur", handleRentalCpfLookup);
     $("#rentalClientCpf").addEventListener("input", () => {
+      const input = $("#rentalClientCpf");
+      input.value = formatDocument(onlyDigits(input.value).slice(0, 14));
       $("#rentalClientId").value = "";
       $("#clientMatchInfo").textContent = "";
     });
@@ -206,6 +212,7 @@
     $("#clearDataBtn").addEventListener("click", clearAllData);
     $("#newExpenseBtn").addEventListener("click", () => openExpenseModal());
     $("#newInstallmentBtn").addEventListener("click", () => openInstallmentModal());
+    $("#newSupplierOffsetBtn").addEventListener("click", () => openSupplierOffsetModal());
 
     $("#modalRoot").addEventListener("click", (event) => {
       if (event.target.dataset.closeModal === "true") {
@@ -215,11 +222,12 @@
   }
 
   async function loadAll() {
-    const [items, clients, rentals, expenses, kits] = await Promise.all([
+    const [items, clients, rentals, expenses, payments, kits] = await Promise.all([
       PlanetaDB.getAll("items"),
       PlanetaDB.getAll("clients"),
       PlanetaDB.getAll("rentals"),
       PlanetaDB.getAll("expenses"),
+      PlanetaDB.getAll("payments"),
       PlanetaDB.getAll("kits"),
     ]);
 
@@ -227,6 +235,7 @@
     state.clients = clients.sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
     state.rentals = rentals.sort((a, b) => Number(b.orderNumber) - Number(a.orderNumber));
     state.expenses = expenses.map(normalizeStoredExpense).sort((a, b) => String(getExpenseDate(b)).localeCompare(String(getExpenseDate(a))));
+    state.payments = payments.sort((a, b) => String(b.date || b.createdAt || "").localeCompare(String(a.date || a.createdAt || "")));
     state.kits = kits.sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
   }
 
@@ -336,6 +345,7 @@
     renderReceivables();
     renderExpenseFilters();
     renderExpenses();
+    renderPaymentReview();
     renderFinanceFilters();
     renderFinance();
     renderBackup();
@@ -350,6 +360,9 @@
     }
     if (viewName === "finance") {
       renderFinance();
+    }
+    if (viewName === "payment-review") {
+      renderPaymentReview();
     }
     if (viewName === "receivables") {
       renderReceivables();
@@ -803,7 +816,7 @@
           <span class="badge">${rentals.length} locação${rentals.length === 1 ? "" : "es"}</span>
         </div>
         <p class="muted-text">
-          ${client.document ? `Documento: ${escapeHtml(client.document)}<br>` : ""}
+          ${client.document ? `${getDocumentLabel(client.document)}: ${escapeHtml(client.document)}<br>` : ""}
           ${client.address ? `Endereço: ${escapeHtml(client.address)}<br>` : ""}
           ${client.notes ? `Obs.: ${escapeHtml(client.notes)}` : ""}
         </p>
@@ -1335,6 +1348,10 @@
     delete rental.clientDraft;
 
     if (existing) {
+      // Em locações já gravadas, o status passa a ser consequência do histórico.
+      // O seletor antigo continua visível para compatibilidade, mas não cria uma
+      // quitação sem um recebimento registrado.
+      rental.paymentStatus = getRentalSettlement(existing).status;
       rental.orderNumber = existing.orderNumber;
       rental.createdAt = existing.createdAt;
       rental.returnProblems = existing.returnProblems || [];
@@ -1355,7 +1372,21 @@
       rental.returnProblems = [];
       rental.paymentReceivedAt = rental.paymentStatus === "paid" ? now : "";
       rental.paymentReopenedAt = "";
-      await PlanetaDB.add("rentals", rental);
+      const rentalId = await PlanetaDB.add("rentals", rental);
+      const initialReceived = rental.paymentStatus === "paid"
+        ? getRentalTotals(rental).total
+        : rental.paymentStatus === "partial"
+          ? Math.min(getRentalTotals(rental).total, toNumber(rental.deposit))
+          : 0;
+      if (initialReceived > 0) {
+        await PlanetaDB.add("payments", {
+          recordType: "rental", recordId: rentalId, recordKey: `rental:${rentalId}`,
+          kind: "rental-receipt", direction: "inflow", amount: initialReceived,
+          date: rental.orderDate || todayISO(), paymentMethod: rental.paymentMethod || "Outro",
+          notes: rental.paymentStatus === "paid" ? "Recebimento informado no cadastro" : "Sinal informado no cadastro",
+          createdAt: now, updatedAt: now, reconciliationStatus: "unmatched", bankTransactionId: null, inventoryLines: [],
+        });
+      }
       showToast(`Locação ${rental.orderNumber} salva como ${statusLabel(rental.status)}.`);
     }
 
@@ -1375,7 +1406,7 @@
     const clientCpf = $("#rentalClientCpf").value.trim();
     const clientPhone = $("#rentalClientPhone").value.trim();
     const clientAddress = $("#rentalClientAddress").value.trim();
-    const cpfDigits = onlyDigits(clientCpf);
+    const documentDigits = onlyDigits(clientCpf);
     const orderDate = $("#rentalOrderDate").value;
     const startDate = $("#rentalStartDate").value;
     const endDate = $("#rentalEndDate").value;
@@ -1386,14 +1417,14 @@
       return null;
     }
 
-    if (!isValidCpf(clientCpf)) {
-      $("#clientMatchInfo").textContent = "CPF inválido. Confira os 11 dígitos antes de salvar a locação.";
+    if (!isValidDocument(clientCpf)) {
+      $("#clientMatchInfo").textContent = getDocumentValidationMessage(clientCpf);
       $("#rentalClientCpf").focus();
-      alert("Informe um CPF válido para continuar a locação. O CPF precisa ter 11 dígitos e dígitos verificadores corretos.");
+      alert("Informe um CPF ou CNPJ válido para continuar a locação.");
       return null;
     }
 
-    $("#rentalClientCpf").value = formatCpf(cpfDigits);
+    $("#rentalClientCpf").value = formatDocument(documentDigits);
 
     if (!orderDate || !startDate || !endDate || endDate < startDate) {
       alert("Informe as datas do pedido, retirada/entrega e devolução corretamente.");
@@ -1450,7 +1481,7 @@
       clientDraft: {
         name: clientName,
         phone: clientPhone,
-        document: formatCpf(cpfDigits),
+        document: formatDocument(documentDigits),
         address: clientAddress,
       },
       orderDate,
@@ -1575,6 +1606,7 @@
   function renderReceivableDetailsContent(rental) {
     const client = getClient(rental.clientId);
     const totals = getRentalTotals(rental);
+    const settlement = getRentalSettlement(rental);
     const items = (rental.items || [])
       .map((line) => `${escapeHtml(line.qty)}x ${escapeHtml(line.name)} (${formatMoney(line.unitPrice)})`)
       .join("<br>");
@@ -1585,7 +1617,7 @@
           <h4>Dados do cliente</h4>
           <div class="detail-grid">
             <div class="metric"><span>Nome</span><strong>${escapeHtml(client?.name || "-")}</strong></div>
-            <div class="metric"><span>CPF/CNPJ</span><strong>${escapeHtml(client?.document || "-")}</strong></div>
+            <div class="metric"><span>${getDocumentLabel(client?.document)}</span><strong>${escapeHtml(client?.document || "-")}</strong></div>
             <div class="metric"><span>Telefone</span><strong>${escapeHtml(client?.phone || "-")}</strong></div>
             <div class="metric"><span>Endereço</span><strong>${escapeHtml(client?.address || "-")}</strong></div>
           </div>
@@ -1609,9 +1641,10 @@
             <div class="metric"><span>Frete</span><strong>${formatMoney(totals.freight)}</strong></div>
             <div class="metric"><span>Total final</span><strong>${formatMoney(totals.total)}</strong></div>
             <div class="metric"><span>Sinal</span><strong>${formatMoney(totals.deposit)}</strong></div>
-            <div class="metric"><span>Restante</span><strong>${formatMoney(getRentalReceivableAmount(rental))}</strong></div>
+            <div class="metric"><span>Já recebido</span><strong>${formatMoney(settlement.received)}</strong></div>
+            <div class="metric"><span>Restante</span><strong>${formatMoney(settlement.remaining)}</strong></div>
             <div class="metric"><span>Forma de pagamento</span><strong>${escapeHtml(rental.paymentMethod || "-")}</strong></div>
-            <div class="metric"><span>Status do pagamento</span><strong>${PAYMENT_STATUS[rental.paymentStatus] || PAYMENT_STATUS.unpaid}</strong></div>
+            <div class="metric"><span>Status do pagamento</span><strong>${PAYMENT_STATUS[settlement.status] || PAYMENT_STATUS.unpaid}</strong></div>
           </div>
         </section>
 
@@ -1623,7 +1656,7 @@
         ${rental.notes ? `<section class="detail-section"><h4>Observações</h4><p class="muted-text">${escapeHtml(rental.notes)}</p></section>` : ""}
 
         <div class="card-actions rental-detail-actions receivable-detail-actions">
-          <button class="primary-action" type="button" data-action="mark-payment-received">Marcar como recebido</button>
+          <button class="primary-action" type="button" data-action="register-rental-payment">Registrar recebimento</button>
           <button class="secondary-action" type="button" data-action="open-full-rental">Abrir locação completa</button>
         </div>
       </div>
@@ -1638,11 +1671,8 @@
         return;
       }
 
-      if (button.dataset.action === "mark-payment-received") {
-        const received = await markRentalPaymentReceived(rental);
-        if (received) {
-          closeModal();
-        }
+      if (button.dataset.action === "register-rental-payment") {
+        openRecordPaymentModal("rental", rental);
         return;
       }
 
@@ -1708,6 +1738,7 @@
   function renderRentalDetailsContent(rental) {
     const client = getClient(rental.clientId);
     const totals = getRentalTotals(rental);
+    const settlement = getRentalSettlement(rental);
     const kitSummary = getRentalKitSummary(rental);
     const items = (rental.items || [])
       .map((line) => {
@@ -1732,7 +1763,7 @@
           </div>
           <div class="badge-row">
             <span class="badge ${statusClass}">${statusLabel(rental.status)}</span>
-            <span class="badge">${PAYMENT_STATUS[rental.paymentStatus] || rental.paymentStatus || "-"}</span>
+            <span class="badge">${PAYMENT_STATUS[settlement.status] || settlement.status || "-"}</span>
           </div>
         </div>
 
@@ -1740,7 +1771,7 @@
           <h4>Dados do cliente</h4>
           <div class="detail-grid">
             <div class="metric"><span>Nome</span><strong>${escapeHtml(client?.name || "-")}</strong></div>
-            <div class="metric"><span>CPF/CNPJ</span><strong>${escapeHtml(client?.document || "-")}</strong></div>
+            <div class="metric"><span>${getDocumentLabel(client?.document)}</span><strong>${escapeHtml(client?.document || "-")}</strong></div>
             <div class="metric"><span>Telefone</span><strong>${escapeHtml(client?.phone || "-")}</strong></div>
             <div class="metric"><span>Endereco</span><strong>${escapeHtml(client?.address || "-")}</strong></div>
           </div>
@@ -1764,7 +1795,8 @@
             <div class="metric"><span>Frete</span><strong>${formatMoney(totals.freight)}</strong></div>
             <div class="metric"><span>Total final</span><strong>${formatMoney(totals.total)}</strong></div>
             <div class="metric"><span>Sinal</span><strong>${formatMoney(totals.deposit)}</strong></div>
-            <div class="metric"><span>Restante</span><strong>${formatMoney(totals.remaining)}</strong></div>
+            <div class="metric"><span>Já recebido</span><strong>${formatMoney(settlement.received)}</strong></div>
+            <div class="metric"><span>Restante</span><strong>${formatMoney(settlement.remaining)}</strong></div>
           </div>
         </section>
 
@@ -1772,7 +1804,7 @@
           <h4>Pagamento</h4>
           <div class="detail-grid">
             <div class="metric"><span>Forma</span><strong>${escapeHtml(rental.paymentMethod || "-")}</strong></div>
-            <div class="metric"><span>Status</span><strong>${PAYMENT_STATUS[rental.paymentStatus] || PAYMENT_STATUS.unpaid}</strong></div>
+            <div class="metric"><span>Status</span><strong>${PAYMENT_STATUS[settlement.status] || PAYMENT_STATUS.unpaid}</strong></div>
             ${rental.paymentReceivedAt ? `<div class="metric"><span>Recebido em</span><strong>${formatReceivedDate(rental.paymentReceivedAt)}</strong></div>` : ""}
           </div>
         </section>
@@ -1780,6 +1812,7 @@
         ${rental.dailyPricing?.enabled ? `<p class="muted-text"><strong>Cobranca por dias ativa:</strong> subtotal ${formatMoney(totals.subtotal)}</p>` : ""}
         ${kitSummary.length ? `<p class="muted-text"><strong>Conjuntos:</strong><br>${kitSummary.map((line) => `${escapeHtml(line.qty)}x ${escapeHtml(line.name)}`).join("<br>")}</p>` : ""}
         <p class="muted-text"><strong>Itens alugados:</strong><br>${items || "Sem itens"}</p>
+        <section class="detail-section"><h4>Histórico de recebimentos</h4>${renderPaymentTimeline("rental", rental)}</section>
         ${rental.notes ? `<p class="muted-text"><strong>Observacoes:</strong><br>${escapeHtml(rental.notes)}</p>` : ""}
         ${returnProblems ? `<p class="muted-text"><strong>Itens com problema na devolução:</strong><br>${returnProblems}</p>` : ""}
 
@@ -1789,7 +1822,8 @@
           <button type="button" data-action="mark-delivered" data-id="${rental.id}">Marcar entregue</button>
           <button type="button" data-action="mark-returned" data-id="${rental.id}">Marcar devolvida</button>
           <button type="button" data-action="cancel-rental" data-id="${rental.id}">Cancelar</button>
-          ${rental.paymentStatus === "paid" && !["quote", "cancelled"].includes(rental.status) ? `<button type="button" data-action="reopen-payment" data-id="${rental.id}">Reabrir pendência</button>` : ""}
+          ${settlement.remaining > 0 && !["quote", "cancelled"].includes(rental.status) ? `<button type="button" data-action="register-rental-payment" data-id="${rental.id}">Registrar recebimento</button>` : ""}
+          <button type="button" data-action="show-rental-payments" data-id="${rental.id}">Ver pagamentos</button>
           <button type="button" class="danger-mini" data-action="delete-rental" data-id="${rental.id}">Excluir</button>
         </div>
       </div>
@@ -1806,6 +1840,7 @@
 
       await handleRentalAction(button.dataset.action, rental, true);
     });
+    $(".payment-timeline", $("#modalRoot"))?.addEventListener("click", (event) => handlePaymentActionClick(event, "rental", rental));
   }
 
   function getRentalKitSummary(rental) {
@@ -2164,6 +2199,10 @@
       if (reopened && fromModal) {
         closeModal();
       }
+    } else if (action === "register-rental-payment") {
+      openRecordPaymentModal("rental", rental);
+    } else if (action === "show-rental-payments") {
+      openRentalDetailsModal(getRental(rental.id) || rental);
     } else if (action === "delete-rental") {
       await deleteRental(rental);
       if (fromModal) {
@@ -2693,8 +2732,9 @@
         </label>
         <label>
           CPF ou CNPJ
-          <input name="document" type="text" value="${escapeAttr(client?.document || "")}">
+          <input name="document" type="text" inputmode="numeric" autocomplete="off" placeholder="000.000.000-00 ou 00.000.000/0000-00" value="${escapeAttr(client?.document || "")}">
         </label>
+        <p id="clientDocumentInfo" class="muted-text wide"></p>
         <label class="wide">
           Endereço
           <input name="address" type="text" value="${escapeAttr(client?.address || "")}">
@@ -2710,15 +2750,43 @@
       </form>
     `);
 
-    $("#clientForm").addEventListener("submit", async (event) => {
+    const clientForm = $("#clientForm");
+    const documentInput = clientForm.elements.document;
+    const validateClientDocument = () => {
+      const digits = onlyDigits(documentInput.value).slice(0, 14);
+      documentInput.value = formatDocument(digits);
+      $("#clientDocumentInfo").textContent = digits ? (isValidDocument(digits) ? `${getDocumentLabel(digits)} válido.` : getDocumentValidationMessage(digits)) : "";
+      return !digits || isValidDocument(digits);
+    };
+    documentInput.addEventListener("input", () => {
+      documentInput.value = formatDocument(onlyDigits(documentInput.value).slice(0, 14));
+      $("#clientDocumentInfo").textContent = "";
+    });
+    documentInput.addEventListener("blur", validateClientDocument);
+    if (documentInput.value) validateClientDocument();
+
+    clientForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const form = event.currentTarget;
       const now = new Date().toISOString();
+      if (!validateClientDocument()) {
+        documentInput.focus();
+        alert("Informe um CPF ou CNPJ válido.");
+        return;
+      }
+      const documentDigits = onlyDigits(documentInput.value);
+      const duplicate = documentDigits ? findClientByDocumentDigits(documentDigits) : null;
+      if (duplicate && Number(duplicate.id) !== Number(client?.id)) {
+        $("#clientDocumentInfo").textContent = `${getDocumentLabel(documentDigits)} já cadastrado para ${duplicate.name}.`;
+        documentInput.focus();
+        alert("Já existe um cliente cadastrado com este CPF ou CNPJ.");
+        return;
+      }
       const payload = {
         id: client?.id,
         name: form.name.value.trim(),
         phone: form.phone.value.trim(),
-        document: form.document.value.trim(),
+        document: documentDigits ? formatDocument(documentDigits) : "",
         address: form.address.value.trim(),
         notes: form.notes.value.trim(),
         createdAt: client?.createdAt || now,
@@ -3485,18 +3553,176 @@
     }
   }
 
+  function getRecordPayments(recordType, recordId) {
+    return state.payments.filter((payment) => payment.recordType === recordType && Number(payment.recordId) === Number(recordId));
+  }
+
+  function getExpenseSettlement(expense) {
+    const total = Math.max(0, toNumber(expense?.amount));
+    const records = getRecordPayments("expense", expense?.id);
+    const legacyAmount = !records.length && expense?.status === "paid" ? total : 0;
+    const cashPaid = records
+      .filter((payment) => payment.kind !== "supplier-offset-sale")
+      .reduce((sum, payment) => sum + toNumber(payment.amount), 0) + legacyAmount;
+    const offsets = records
+      .filter((payment) => payment.kind === "supplier-offset-sale")
+      .reduce((sum, payment) => sum + toNumber(payment.amount), 0);
+    const settled = Math.min(total, roundMoney(cashPaid + offsets));
+    const remaining = Math.max(0, roundMoney(total - settled));
+    const status = remaining <= 0
+      ? "paid"
+      : settled > 0
+        ? "partial"
+        : getExpenseDate(expense) < todayISO()
+          ? "overdue"
+          : "pending";
+
+    return { total, records, cashPaid: roundMoney(cashPaid), offsets: roundMoney(offsets), settled, remaining, status, legacyAmount };
+  }
+
+  function getRentalSettlement(rental) {
+    const total = getRentalTotals(rental).total;
+    const records = getRecordPayments("rental", rental?.id);
+    const legacyAmount = !records.length
+      ? (rental?.paymentStatus === "paid" ? total : rental?.paymentStatus === "partial" ? Math.min(total, toNumber(rental?.deposit)) : 0)
+      : 0;
+    const received = Math.min(total, roundMoney(records.reduce((sum, payment) => sum + toNumber(payment.amount), 0) + legacyAmount));
+    const remaining = Math.max(0, roundMoney(total - received));
+    return {
+      total,
+      records,
+      received,
+      remaining,
+      status: remaining <= 0 ? "paid" : received > 0 ? "partial" : "unpaid",
+      legacyAmount,
+    };
+  }
+
+  function getMaximumCommittedQuantity(item) {
+    const dates = new Set();
+    state.rentals
+      .filter((rental) => ACTIVE_STATUSES.includes(rental.status))
+      .forEach((rental) => {
+        dates.add(rental.startDate);
+        dates.add(rental.endDate);
+      });
+    let highest = 0;
+    dates.forEach((date) => {
+      const used = getItemPeriodConflicts(item, date, date).reduce((sum, conflict) => sum + conflict.qty, 0);
+      highest = Math.max(highest, used);
+    });
+    return highest;
+  }
+
+  function getSafeSaleAvailability(item) {
+    if (!item) {
+      return 0;
+    }
+    return Math.max(0, toNumber(item.totalQty) - toNumber(item.unavailableQty) - getMaximumCommittedQuantity(item));
+  }
+
+  function renderPaymentTimeline(recordType, record) {
+    const payments = getRecordPayments(recordType, record.id);
+    const legacyAmount = recordType === "expense" ? getExpenseSettlement(record).legacyAmount : getRentalSettlement(record).legacyAmount;
+    const lines = payments.map((payment) => `
+      <div class="payment-timeline-item">
+        <div>
+          <strong>${payment.kind === "supplier-offset-sale" ? "Abatimento por venda" : recordType === "rental" ? "Recebimento" : "Pagamento"}</strong>
+          <span>${formatDate(payment.date)} · ${escapeHtml(payment.paymentMethod || "Compensado com fornecedor")}${payment.notes ? ` · ${escapeHtml(payment.notes)}` : ""}</span>
+        </div>
+        <div class="payment-timeline-value">
+          <strong>${formatMoney(payment.amount)}</strong>
+          <button type="button" data-action="edit-payment" data-payment-id="${payment.id}">Editar</button>
+          <button type="button" class="danger-mini" data-action="delete-payment" data-payment-id="${payment.id}">Excluir</button>
+        </div>
+      </div>`);
+    if (legacyAmount > 0) {
+      lines.unshift(`<div class="payment-timeline-item legacy-payment"><div><strong>Migrado - revisar data</strong><span>Registro antigo preservado. Use a revisão para criar um lançamento editável.</span></div><strong>${formatMoney(legacyAmount)}</strong></div>`);
+    }
+    return lines.length ? `<div class="payment-timeline">${lines.join("")}</div>` : `<p class="muted-text">Nenhum pagamento ou abatimento registrado.</p>`;
+  }
+
+  function getLegacyPaymentCandidates() {
+    const expenses = state.expenses
+      .map((expense) => ({ recordType: "expense", record: expense, amount: getExpenseSettlement(expense).legacyAmount, date: expense.paidAt?.slice(0, 10) || getExpenseDate(expense) }))
+      .filter((entry) => entry.amount > 0);
+    const rentals = state.rentals
+      .filter(isRentalFinancialEntry)
+      .map((rental) => ({ recordType: "rental", record: rental, amount: getRentalSettlement(rental).legacyAmount, date: rental.paymentReceivedAt?.slice(0, 10) || rental.startDate || rental.orderDate }))
+      .filter((entry) => entry.amount > 0);
+    return [...expenses, ...rentals].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  }
+
+  function renderPaymentReview() {
+    const candidates = getLegacyPaymentCandidates();
+    const offsets = state.payments.filter((payment) => payment.kind === "supplier-offset-sale");
+    const candidateTotal = candidates.reduce((sum, entry) => sum + entry.amount, 0);
+    const offsetTotal = offsets.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
+    $("#paymentReviewStats").innerHTML = [
+      ["Registros antigos a revisar", candidates.length],
+      ["Valor histórico identificado", formatMoney(candidateTotal)],
+      ["Abatimentos cadastrados", offsets.length],
+      ["Créditos comerciais", formatMoney(offsetTotal)],
+    ].map(([label, value]) => `<article class="kpi-card"><span>${label}</span><strong>${value}</strong></article>`).join("");
+    const rows = candidates.map((entry) => `
+      <article class="data-card">
+        <div class="card-top"><div><h3 class="card-title">${escapeHtml(entry.recordType === "expense" ? entry.record.description : `Pedido ${entry.record.orderNumber}`)}</h3><p class="card-subtitle">${entry.recordType === "expense" ? "Gasto/parcela" : "Locação"} · data sugerida ${formatDate(entry.date)}</p></div><span class="badge yellow">Migrado - revisar data</span></div>
+        <div class="metric-grid"><div class="metric"><span>Valor a criar no histórico</span><strong>${formatMoney(entry.amount)}</strong></div><div class="metric"><span>Data sugerida</span><strong>${formatDate(entry.date)}</strong></div></div>
+        <div class="card-actions"><button class="primary-action" type="button" data-action="migrate-legacy-payment" data-record-type="${entry.recordType}" data-id="${entry.record.id}">Criar pagamento histórico</button><button type="button" data-action="open-review-record" data-record-type="${entry.recordType}" data-id="${entry.record.id}">Abrir detalhes</button></div>
+      </article>`).join("");
+    $("#paymentReviewList").innerHTML = rows || emptyState("Nenhum pagamento antigo aguardando revisão. Os novos pagamentos e abatimentos já são registrados separadamente.");
+  }
+
+  async function handlePaymentReviewClick(event) {
+    const button = event.target.closest("button[data-action]");
+    if (!button) return;
+    const recordType = button.dataset.recordType;
+    const record = recordType === "expense" ? getExpense(button.dataset.id) : getRental(button.dataset.id);
+    if (!record) return;
+    if (button.dataset.action === "open-review-record") {
+      if (recordType === "expense") openExpenseDetailsModal(record);
+      else openRentalDetailsModal(record);
+      return;
+    }
+    if (button.dataset.action !== "migrate-legacy-payment") return;
+    const summary = recordType === "expense" ? getExpenseSettlement(record) : getRentalSettlement(record);
+    if (!summary.legacyAmount || !confirm(`Criar um lançamento histórico de ${formatMoney(summary.legacyAmount)}? Depois você poderá editar a data, o valor ou dividir em vários pagamentos.`)) return;
+    const now = new Date().toISOString();
+    const date = recordType === "expense" ? record.paidAt?.slice(0, 10) || getExpenseDate(record) : record.paymentReceivedAt?.slice(0, 10) || record.startDate || record.orderDate;
+    await PlanetaDB.add("payments", {
+      recordType,
+      recordId: Number(record.id),
+      recordKey: `${recordType}:${record.id}`,
+      kind: recordType === "rental" ? "rental-receipt" : "expense-payment",
+      direction: recordType === "rental" ? "inflow" : "outflow",
+      amount: summary.legacyAmount,
+      date,
+      paymentMethod: record.paymentMethod || "Outro",
+      notes: "Migrado - revisar data",
+      createdAt: now,
+      updatedAt: now,
+      migrationStatus: "needs-review",
+      reconciliationStatus: "unmatched",
+      bankTransactionId: null,
+      inventoryLines: [],
+    });
+    await loadAll();
+    const fresh = recordType === "expense" ? getExpense(record.id) : getRental(record.id);
+    if (fresh) await syncRecordPaymentStatus(recordType, fresh);
+    await loadAll();
+    refreshAll();
+    showToast("Pagamento histórico criado. Revise a data antes de considerar a conciliação concluída.");
+  }
+
   function renderExpenseFilters() {
     fillSelect($("#expenseCategoryFilter"), uniqueValues(state.expenses.map((expense) => expense.category || "Sem categoria")), "Todas");
   }
 
   function renderExpenses() {
     const expenses = state.expenses.filter(isExpenseInExpenseFilters);
-    const paidTotal = expenses
-      .filter((expense) => expenseEffectiveStatus(expense) === "paid")
-      .reduce((sum, expense) => sum + toNumber(expense.amount), 0);
-    const pendingTotal = expenses
-      .filter((expense) => expenseEffectiveStatus(expense) !== "paid")
-      .reduce((sum, expense) => sum + toNumber(expense.amount), 0);
+    const paidTotal = expenses.reduce((sum, expense) => sum + getExpenseSettlement(expense).cashPaid, 0);
+    const pendingTotal = expenses.reduce((sum, expense) => sum + getExpenseSettlement(expense).remaining, 0);
+    const offsetTotal = expenses.reduce((sum, expense) => sum + getExpenseSettlement(expense).offsets, 0);
     const investmentTotal = expenses
       .filter((expense) => normalizeExpenseType(expense) === "investment")
       .reduce((sum, expense) => sum + toNumber(expense.amount), 0);
@@ -3510,6 +3736,7 @@
       ["Custos", formatMoney(costTotal)],
       ["Gastos pagos", formatMoney(paidTotal)],
       ["Pendentes", formatMoney(pendingTotal)],
+      ["Abatimentos", formatMoney(offsetTotal)],
       ["Parcelas", installments],
     ]
       .map(([label, value]) => `<article class="kpi-card"><span>${label}</span><strong>${value}</strong></article>`)
@@ -3537,7 +3764,8 @@
   }
 
   function renderExpenseCard(expense) {
-    const status = expenseEffectiveStatus(expense);
+    const settlement = getExpenseSettlement(expense);
+    const status = settlement.status;
     const statusClass = status === "paid" ? "green" : status === "overdue" ? "red" : "yellow";
     const isInstallment = (expense.kind || "manual") === "installment";
 
@@ -3555,15 +3783,18 @@
           </div>
         </div>
         <div class="metric-grid">
-          <div class="metric"><span>Valor</span><strong>${formatMoney(expense.amount)}</strong></div>
-          <div class="metric"><span>Pagamento</span><strong>${escapeHtml(expense.paymentMethod || "-")}</strong></div>
+          <div class="metric"><span>Valor total</span><strong>${formatMoney(settlement.total)}</strong></div>
+          <div class="metric"><span>Pago em caixa</span><strong>${formatMoney(settlement.cashPaid)}</strong></div>
+          <div class="metric"><span>Abatimentos</span><strong>${formatMoney(settlement.offsets)}</strong></div>
+          <div class="metric"><span>Restante</span><strong>${formatMoney(settlement.remaining)}</strong></div>
           <div class="metric"><span>Tipo</span><strong>${isInstallment ? "Parcelado" : "Manual"}</strong></div>
           <div class="metric"><span>Status</span><strong>${EXPENSE_STATUS[status] || status}</strong></div>
         </div>
         ${expense.notes ? `<p class="muted-text">Obs.: ${escapeHtml(expense.notes)}</p>` : ""}
         <div class="card-actions">
+          <button type="button" data-action="expense-details" data-id="${expense.id}">Detalhes</button>
+          <button type="button" data-action="register-expense-payment" data-id="${expense.id}">Registrar pagamento</button>
           <button type="button" data-action="edit-expense" data-id="${expense.id}">Editar</button>
-          ${status !== "paid" ? `<button type="button" data-action="mark-expense-paid" data-id="${expense.id}">Marcar pago</button>` : ""}
           <button type="button" class="danger-mini" data-action="delete-expense" data-id="${expense.id}">Excluir</button>
         </div>
       </article>
@@ -3592,6 +3823,12 @@
     const paidExpenseTotal = movements
       .filter((movement) => movement.type === "paid-expense")
       .reduce((sum, movement) => sum + movement.amount, 0);
+    const supplierOffsetTotal = movements
+      .filter((movement) => movement.type === "supplier-offset")
+      .reduce((sum, movement) => sum + movement.amount, 0);
+    const offsetProfitTotal = movements
+      .filter((movement) => movement.type === "supplier-offset" && Number.isFinite(toNumber(movement.profit)))
+      .reduce((sum, movement) => sum + toNumber(movement.profit), 0);
     const pendingExpenseTotal = movements
       .filter((movement) => movement.type === "pending-expense" || movement.type === "future-expense")
       .reduce((sum, movement) => sum + movement.amount, 0);
@@ -3599,25 +3836,28 @@
       .filter((movement) => movement.type === "future-expense")
       .reduce((sum, movement) => sum + movement.amount, 0);
     const investmentTotal = movements
-      .filter((movement) => movement.source === "expense" && movement.expenseType === "investment")
+      .filter((movement) => movement.source === "expense" && movement.expenseType === "investment" && ["paid-expense", "supplier-offset"].includes(movement.type))
       .reduce((sum, movement) => sum + movement.amount, 0);
     const costTotal = movements
-      .filter((movement) => movement.source === "expense" && movement.expenseType === "cost")
+      .filter((movement) => movement.source === "expense" && movement.expenseType === "cost" && ["paid-expense", "supplier-offset"].includes(movement.type))
       .reduce((sum, movement) => sum + movement.amount, 0);
     const overdueTotal = movements
       .filter((movement) => movement.source === "expense" && movement.status === "overdue")
       .reduce((sum, movement) => sum + movement.amount, 0);
 
     $("#financeStats").innerHTML = [
-      ["Total de entradas", formatMoney(incomeTotal)],
+      ["Entradas reais de caixa", formatMoney(incomeTotal)],
+      ["Saídas reais de caixa", formatMoney(paidExpenseTotal)],
+      ["Vendas com abatimento", formatMoney(supplierOffsetTotal)],
+      ["Abatimentos em dívidas", formatMoney(supplierOffsetTotal)],
+      ["Lucro das vendas informado", formatMoney(offsetProfitTotal)],
       ["Locações a receber", formatMoney(receivableTotal)],
       ["Total de gastos", formatMoney(investmentTotal + costTotal)],
       ["Total de investimentos", formatMoney(investmentTotal)],
       ["Total de custos", formatMoney(costTotal)],
-      ["Total de gastos pagos", formatMoney(paidExpenseTotal)],
-      ["Total de gastos pendentes", formatMoney(pendingExpenseTotal)],
+      ["Total ainda a pagar", formatMoney(pendingExpenseTotal)],
       ["Parcelas futuras", formatMoney(futureExpenseTotal)],
-      ["Saldo final", formatMoney(incomeTotal - paidExpenseTotal)],
+      ["Saldo de caixa", formatMoney(incomeTotal - paidExpenseTotal)],
       ["Atrasados", formatMoney(overdueTotal)],
     ]
       .map(([label, value]) => `<article class="kpi-card"><span>${label}</span><strong>${value}</strong></article>`)
@@ -3634,6 +3874,7 @@
       costTotal,
       paidExpenseTotal,
       pendingExpenseTotal,
+      supplierOffsetTotal,
     });
   }
 
@@ -3643,6 +3884,7 @@
 
     drawPieChart("financeMixChart", "financeMixLegend", [
       { label: "Entradas", value: totals.incomeTotal, color: "#138a43" },
+      { label: "Abatimentos", value: totals.supplierOffsetTotal, color: "#6b4fa1" },
       { label: "Custos", value: totals.costTotal, color: "#df1f2d" },
       { label: "Investimentos", value: totals.investmentTotal, color: "#0b4ea2" },
     ]);
@@ -3754,88 +3996,56 @@
   }
 
   function getFinanceMovements() {
-    const rentalMovements = state.rentals
-      .filter(isRentalFinancialEntry)
-      .flatMap((rental) => {
-        const client = getClient(rental.clientId);
-        const totals = getRentalTotals(rental);
-        const receivedAmount = getRentalReceivedAmount(rental);
-        const receivableAmount = getRentalReceivableAmount(rental);
-        const baseMovement = {
-          source: "rental",
-          category: "Locações",
-          date: rental.startDate || rental.orderDate,
-          title: `Pedido ${rental.orderNumber}`,
-          clientName: client?.name || "Cliente não encontrado",
-          itemText: (Array.isArray(rental.items) ? rental.items : []).map((line) => `${line.qty}x ${line.name}`).join(", "),
-          startDate: rental.startDate,
-          endDate: rental.endDate,
-          paymentMethod: rental.paymentMethod || "-",
-          paymentStatus: rental.paymentStatus || "unpaid",
-          rentalTotal: totals.total,
-        };
+    const movements = [];
+    state.rentals.filter(isRentalFinancialEntry).forEach((rental) => {
+      const client = getClient(rental.clientId);
+      const settlement = getRentalSettlement(rental);
+      const base = {
+        source: "rental", category: "Locações", title: `Pedido ${rental.orderNumber}`,
+        clientName: client?.name || "Cliente não encontrado",
+        itemText: (rental.items || []).map((line) => `${line.qty}x ${line.name}`).join(", "),
+        startDate: rental.startDate, endDate: rental.endDate, rentalTotal: settlement.total,
+        paymentStatus: settlement.status,
+      };
+      const receipts = settlement.records.length ? settlement.records : settlement.legacyAmount ? [{
+        id: `legacy-rental-${rental.id}`, amount: settlement.legacyAmount, date: rental.paymentReceivedAt?.slice(0, 10) || rental.startDate || rental.orderDate,
+        paymentMethod: rental.paymentMethod || "-", notes: "Migrado - revisar data", legacy: true,
+      }] : [];
+      receipts.forEach((payment) => movements.push({ ...base, id: `rental-income-${payment.id}`, type: "income", amount: toNumber(payment.amount), date: payment.date, paymentMethod: payment.paymentMethod || "-", notes: payment.notes || "", legacy: payment.legacy }));
+      if (settlement.remaining > 0) movements.push({ ...base, id: `rental-receivable-${rental.id}`, type: "pending-income", amount: settlement.remaining, date: rental.startDate || rental.orderDate, paymentMethod: "-", notes: "" });
+    });
 
-        const movements = [];
-        if (receivedAmount > 0) {
-          movements.push({
-            ...baseMovement,
-            id: `rental-income-${rental.id}`,
-            type: "income",
-            amount: receivedAmount,
-          });
-        }
-
-        if (receivableAmount > 0) {
-          movements.push({
-            ...baseMovement,
-            id: `rental-receivable-${rental.id}`,
-            type: "pending-income",
-            amount: receivableAmount,
-          });
-        }
-
-        return movements;
+    state.expenses.forEach((expense) => {
+      const settlement = getExpenseSettlement(expense);
+      const base = {
+        source: "expense", expenseId: expense.id, category: expense.category || "Sem categoria",
+        expenseType: normalizeExpenseType(expense), title: expense.description || "Gasto sem descrição",
+        status: settlement.status, kind: expense.kind || "manual", installmentNumber: expense.installmentNumber,
+        installmentTotal: expense.installmentTotal,
+      };
+      const records = settlement.records.length ? settlement.records : settlement.legacyAmount ? [{
+        id: `legacy-expense-${expense.id}`, amount: settlement.legacyAmount, date: expense.paidAt?.slice(0, 10) || getExpenseDate(expense),
+        paymentMethod: expense.paymentMethod || "-", notes: "Migrado - revisar data", legacy: true,
+      }] : [];
+      records.forEach((payment) => movements.push({
+        ...base, id: `expense-payment-${payment.id}`, type: payment.kind === "supplier-offset-sale" ? "supplier-offset" : "paid-expense",
+        amount: toNumber(payment.amount), date: payment.date, paymentMethod: payment.paymentMethod || "-", notes: payment.notes || "",
+        supplier: payment.supplier || "", buyer: payment.buyer || "", profit: payment.profit, legacy: payment.legacy,
+      }));
+      if (settlement.remaining > 0) movements.push({
+        ...base, id: `expense-pending-${expense.id}`, type: financeTypeForExpense({ ...expense, status: settlement.status }),
+        amount: settlement.remaining, date: getExpenseDate(expense), paymentMethod: "-", notes: expense.notes || "",
       });
-
-    const expenses = state.expenses.map((expense) => ({
-      id: `expense-${expense.id}`,
-      source: "expense",
-      expenseId: expense.id,
-      type: financeTypeForExpense(expense),
-      category: expense.category || "Sem categoria",
-      expenseType: normalizeExpenseType(expense),
-      date: getExpenseDate(expense),
-      amount: toNumber(expense.amount),
-      title: expense.description || "Gasto sem descrição",
-      paymentMethod: expense.paymentMethod || "-",
-      status: expenseEffectiveStatus(expense),
-      notes: expense.notes || "",
-      kind: expense.kind || "manual",
-      installmentNumber: expense.installmentNumber,
-      installmentTotal: expense.installmentTotal,
-    }));
-
-    return [...rentalMovements, ...expenses].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    });
+    return movements.sort((a, b) => String(b.date).localeCompare(String(a.date)));
   }
 
   function getRentalReceivedAmount(rental) {
-    const totals = getRentalTotals(rental);
-    const paymentStatus = rental?.paymentStatus || "unpaid";
-
-    if (paymentStatus === "paid") {
-      return totals.total;
-    }
-
-    if (paymentStatus === "partial") {
-      return Math.min(totals.total, totals.deposit);
-    }
-
-    return 0;
+    return getRentalSettlement(rental).received;
   }
 
   function getRentalReceivableAmount(rental) {
-    const totals = getRentalTotals(rental);
-    return Math.max(0, roundMoney(totals.total - getRentalReceivedAmount(rental)));
+    return getRentalSettlement(rental).remaining;
   }
 
   function formatReceivedDate(value) {
@@ -3914,6 +4124,7 @@
           <div class="metric"><span>Parcela</span><strong>${movement.installmentTotal ? `${movement.installmentNumber}/${movement.installmentTotal}` : "-"}</strong></div>
         </div>
         ${movement.notes ? `<p class="muted-text">Obs.: ${escapeHtml(movement.notes)}</p>` : ""}
+        ${movement.type === "supplier-offset" ? `<p class="muted-text"><strong>Compensado com fornecedor:</strong> ${escapeHtml(movement.supplier || "não informado")}${movement.buyer ? ` · comprador: ${escapeHtml(movement.buyer)}` : ""}${movement.profit !== null && movement.profit !== undefined ? ` · lucro informado: ${formatMoney(movement.profit)}` : ""}</p>` : ""}
         <div class="card-actions">
           <button type="button" data-action="edit-expense" data-id="${movement.expenseId}">Editar</button>
           ${movement.status !== "paid" ? `<button type="button" data-action="mark-expense-paid" data-id="${movement.expenseId}">Marcar pago</button>` : ""}
@@ -3941,7 +4152,7 @@
             <strong>${escapeHtml(expense.description || "Gasto")}</strong>
             <span>${formatDate(getExpenseDate(expense))} · ${escapeHtml(expense.category || "Sem categoria")}</span>
           </div>
-          <span>${formatMoney(expense.amount)}</span>
+          <span>${formatMoney(getExpenseSettlement(expense).remaining)}</span>
         </div>
       `)
       .join("");
@@ -3965,7 +4176,7 @@
             <strong>${escapeHtml(expense.description || "Gasto")}</strong>
             <span>Venceu em ${formatDate(getExpenseDate(expense))}</span>
           </div>
-          <span>${formatMoney(expense.amount)}</span>
+          <span>${formatMoney(getExpenseSettlement(expense).remaining)}</span>
         </div>
       `)
       .join("");
@@ -3997,8 +4208,12 @@
 
     if (button.dataset.action === "edit-expense") {
       openExpenseModal(expense);
+    } else if (button.dataset.action === "expense-details") {
+      openExpenseDetailsModal(expense);
+    } else if (button.dataset.action === "register-expense-payment") {
+      openRecordPaymentModal("expense", expense);
     } else if (button.dataset.action === "mark-expense-paid") {
-      await markExpensePaid(expense);
+      openRecordPaymentModal("expense", expense);
     } else if (button.dataset.action === "delete-expense") {
       await deleteExpense(expense);
     }
@@ -4093,7 +4308,7 @@
         category: form.category.value.trim() || "Outro",
         amount: Math.max(0, toNumber(form.amount.value)),
         paymentMethod: form.paymentMethod.value,
-        status: form.status.value,
+        status: expense ? getExpenseSettlement(expense).status : form.status.value,
         notes: form.notes.value.trim(),
         createdAt: expense?.createdAt || now,
         updatedAt: now,
@@ -4120,7 +4335,16 @@
       if (expense) {
         await PlanetaDB.put("expenses", payload);
       } else {
-        await PlanetaDB.add("expenses", payload);
+        const id = await PlanetaDB.add("expenses", payload);
+        if (payload.status === "paid") {
+          await PlanetaDB.add("payments", {
+            recordType: "expense", recordId: id, recordKey: `expense:${id}`,
+            kind: "expense-payment", direction: "outflow", amount: payload.amount,
+            date: payload.date || payload.dueDate || todayISO(), paymentMethod: payload.paymentMethod || "Outro",
+            notes: "Pagamento informado no cadastro", createdAt: now, updatedAt: now,
+            reconciliationStatus: "unmatched", bankTransactionId: null, inventoryLines: [],
+          });
+        }
       }
 
       closeModal();
@@ -4211,7 +4435,8 @@
       event.preventDefault();
       const total = Math.max(1, Math.floor(toNumber(form.installmentTotal.value)));
       const totalAmountValue = roundMoney(toNumber(form.totalAmount.value));
-      const baseAmount = roundMoney(totalAmountValue / total);
+      const totalCents = Math.round(totalAmountValue * 100);
+      const baseCents = Math.floor(totalCents / total);
 
       if (!form.description.value.trim() || !totalAmountValue || !form.dueDate.value) {
         alert("Confira descrição, valor total, quantidade e primeiro vencimento das parcelas.");
@@ -4221,8 +4446,8 @@
       const now = new Date().toISOString();
       const seriesId = `parcelas-${Date.now()}`;
       for (let number = 1; number <= total; number += 1) {
-        const amount = number === total ? roundMoney(totalAmountValue - baseAmount * (total - 1)) : baseAmount;
-        await PlanetaDB.add("expenses", {
+        const amount = (number === total ? totalCents - baseCents * (total - 1) : baseCents) / 100;
+        const expenseId = await PlanetaDB.add("expenses", {
           kind: "installment",
           seriesId,
           expenseType: form.expenseType.value,
@@ -4230,7 +4455,7 @@
           category: form.category.value.trim() || "Compra de equipamentos",
           amount,
           totalAmount: totalAmountValue,
-          installmentAmount: baseAmount,
+          installmentAmount: baseCents / 100,
           installmentFrequency: form.frequency.value,
           dueDate: addMonthsToISODate(form.dueDate.value, number - 1),
           paymentMethod: form.paymentMethod.value,
@@ -4242,6 +4467,14 @@
           updatedAt: now,
           paidAt: form.status.value === "paid" ? now : undefined,
         });
+        if (form.status.value === "paid") {
+          await PlanetaDB.add("payments", {
+            recordType: "expense", recordId: expenseId, recordKey: `expense:${expenseId}`,
+            kind: "expense-payment", direction: "outflow", amount, date: addMonthsToISODate(form.dueDate.value, number - 1),
+            paymentMethod: form.paymentMethod.value, notes: "Pagamento informado no cadastro", createdAt: now, updatedAt: now,
+            reconciliationStatus: "unmatched", bankTransactionId: null, inventoryLines: [],
+          });
+        }
       }
 
       closeModal();
@@ -4252,17 +4485,7 @@
   }
 
   async function markExpensePaid(expense) {
-    if (confirm(`Marcar "${expense.description}" como pago?`)) {
-      await PlanetaDB.put("expenses", {
-        ...expense,
-        status: "paid",
-        paidAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
-      await loadAll();
-      refreshAll();
-      showToast("Gasto marcado como pago.");
-    }
+    openRecordPaymentModal("expense", expense);
   }
 
   async function deleteExpense(expense) {
@@ -4354,6 +4577,7 @@
       clients: Array.isArray(data.stores.clients) ? data.stores.clients.length : 0,
       rentals: Array.isArray(data.stores.rentals) ? data.stores.rentals.length : 0,
       expenses: Array.isArray(data.stores.expenses) ? data.stores.expenses.length : 0,
+      payments: Array.isArray(data.stores.payments) ? data.stores.payments.length : 0,
       kits: Array.isArray(data.stores.kits) ? data.stores.kits.length : 0,
     };
 
@@ -4363,6 +4587,7 @@
       `Clientes: ${counts.clients}`,
       `Locações: ${counts.rentals}`,
       `Gastos/parcelas: ${counts.expenses}`,
+      `Pagamentos e abatimentos: ${counts.payments}`,
     ].join("\n");
   }
 
@@ -4742,17 +4967,17 @@
     return "yellow";
   }
 
-  function findClientByCpfDigits(cpfDigits) {
-    return state.clients.find((client) => onlyDigits(client.document) === cpfDigits);
+  function findClientByDocumentDigits(documentDigits) {
+    return state.clients.find((client) => onlyDigits(client.document) === documentDigits);
   }
 
   async function ensureRentalClient(clientDraft, currentClientId = null) {
     const now = new Date().toISOString();
-    const cpfDigits = onlyDigits(clientDraft.document);
-    const existingByCpf = findClientByCpfDigits(cpfDigits);
+    const documentDigits = onlyDigits(clientDraft.document);
+    const existingByDocument = findClientByDocumentDigits(documentDigits);
     const currentClient = currentClientId ? getClient(currentClientId) : null;
-    const canReuseCurrent = currentClient && (!onlyDigits(currentClient.document) || onlyDigits(currentClient.document) === cpfDigits);
-    const target = existingByCpf || (canReuseCurrent ? currentClient : null);
+    const canReuseCurrent = currentClient && (!onlyDigits(currentClient.document) || onlyDigits(currentClient.document) === documentDigits);
+    const target = existingByDocument || (canReuseCurrent ? currentClient : null);
 
     if (target) {
       const payload = {
@@ -4782,26 +5007,26 @@
 
   function handleRentalCpfLookup() {
     const cpfInput = $("#rentalClientCpf");
-    const cpfDigits = onlyDigits(cpfInput.value);
+    const documentDigits = onlyDigits(cpfInput.value);
     const info = $("#clientMatchInfo");
 
     $("#rentalClientId").value = "";
     info.textContent = "";
 
-    if (!cpfDigits) {
+    if (!documentDigits) {
       return;
     }
 
-    if (!isValidCpf(cpfDigits)) {
-      info.textContent = "CPF inválido. Confira os 11 dígitos antes de salvar a locação.";
+    if (!isValidDocument(documentDigits)) {
+      info.textContent = getDocumentValidationMessage(documentDigits);
       return;
     }
 
-    cpfInput.value = formatCpf(cpfDigits);
-    const client = findClientByCpfDigits(cpfDigits);
+    cpfInput.value = formatDocument(documentDigits);
+    const client = findClientByDocumentDigits(documentDigits);
 
     if (!client) {
-      info.textContent = "CPF válido. Um novo cliente será criado ao salvar a locação.";
+      info.textContent = `${getDocumentLabel(documentDigits)} válido. Um novo cliente será criado ao salvar a locação.`;
       return;
     }
 
@@ -4856,12 +5081,304 @@
     if (!expense) {
       return "pending";
     }
+    return getExpenseSettlement(expense).status;
+  }
 
-    if (expense.status === "paid") {
-      return "paid";
+  function openExpenseDetailsModal(expense) {
+    const settlement = getExpenseSettlement(expense);
+    openModal("Detalhes do gasto", `
+      <div class="rental-detail-modal expense-detail-modal">
+        <section class="detail-section">
+          <h4>${escapeHtml(expense.description || "Gasto")}</h4>
+          <div class="detail-grid">
+            <div class="metric"><span>Vencimento</span><strong>${formatDate(getExpenseDate(expense))}</strong></div>
+            <div class="metric"><span>Status</span><strong>${EXPENSE_STATUS[settlement.status]}</strong></div>
+            <div class="metric"><span>Valor total</span><strong>${formatMoney(settlement.total)}</strong></div>
+            <div class="metric"><span>Restante</span><strong>${formatMoney(settlement.remaining)}</strong></div>
+            <div class="metric"><span>Pago em dinheiro/Pix</span><strong>${formatMoney(settlement.cashPaid)}</strong></div>
+            <div class="metric"><span>Abatimentos comerciais</span><strong>${formatMoney(settlement.offsets)}</strong></div>
+          </div>
+        </section>
+        <section class="detail-section">
+          <h4>Linha do tempo</h4>
+          ${renderPaymentTimeline("expense", expense)}
+        </section>
+        <div class="card-actions expense-detail-actions">
+          <button class="primary-action" type="button" data-action="register-expense-payment" data-id="${expense.id}">Registrar pagamento</button>
+          <button type="button" data-action="open-offset" data-id="${expense.id}">Venda com abatimento</button>
+          <button type="button" data-action="edit-expense" data-id="${expense.id}">Editar gasto</button>
+        </div>
+      </div>
+    `);
+    $(".expense-detail-actions", $("#modalRoot")).addEventListener("click", (event) => handlePaymentActionClick(event, "expense", expense));
+    $(".payment-timeline", $("#modalRoot"))?.addEventListener("click", (event) => handlePaymentActionClick(event, "expense", expense));
+  }
+
+  function openRecordPaymentModal(recordType, record, payment = null) {
+    const summary = recordType === "expense" ? getExpenseSettlement(record) : getRentalSettlement(record);
+    if (!payment && summary.legacyAmount > 0) {
+      alert("Este registro ainda usa um status antigo. Abra Revisar pagamentos e crie o lançamento \"Migrado - revisar data\" antes de adicionar outro pagamento.");
+      return;
     }
+    const amountLimit = payment ? summary.remaining + toNumber(payment.amount) : summary.remaining;
+    if (!payment && amountLimit <= 0) {
+      alert("Este registro já está quitado.");
+      return;
+    }
+    const title = payment ? "Editar pagamento" : recordType === "rental" ? "Registrar recebimento" : "Registrar pagamento";
+    const defaultAmount = payment ? toNumber(payment.amount) : amountLimit;
+    openModal(title, `
+      <form id="recordPaymentForm" class="form-grid">
+          <p class="muted-text wide">${recordType === "rental" ? "Locação" : "Gasto/parcela"}: <strong>${escapeHtml(recordType === "rental" ? `Pedido ${record.orderNumber}` : record.description)}</strong><br>Restante atual: <strong>${formatMoney(amountLimit)}</strong></p>
+        <label>
+          Valor ${recordType === "rental" ? "recebido" : "pago"}
+          <input name="amount" type="text" inputmode="decimal" required value="${escapeAttr(defaultAmount.toFixed(2).replace(".", ","))}">
+        </label>
+        <label>
+          Data real do pagamento
+          <input name="date" type="date" required value="${escapeAttr(payment?.date || todayISO())}">
+        </label>
+        <label>
+          Forma de pagamento
+          <select name="paymentMethod">
+            ${["Pix", "Dinheiro", "Cartão", "Boleto", "Outro"].map((method) => `<option ${method === (payment?.paymentMethod || record.paymentMethod || "Pix") ? "selected" : ""}>${method}</option>`).join("")}
+          </select>
+        </label>
+        <label class="wide">
+          Observação
+          <textarea name="notes" rows="3">${escapeHtml(payment?.notes || "")}</textarea>
+        </label>
+        <div class="form-actions wide">
+          <button class="secondary-action" type="button" data-close-modal="true">Cancelar</button>
+          <button class="primary-action" type="submit">${payment ? "Salvar alteração" : "Registrar"}</button>
+        </div>
+      </form>
+    `);
+    $("#recordPaymentForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const amount = parseMoneyValue(form.amount.value);
+      if (!amount || amount <= 0 || amount > amountLimit + 0.005 || !form.date.value) {
+        alert(`Informe um valor válido de até ${formatMoney(amountLimit)} e uma data.`);
+        return;
+      }
+      const now = new Date().toISOString();
+      const payload = {
+        ...(payment || {}),
+        recordType,
+        recordId: Number(record.id),
+        recordKey: `${recordType}:${record.id}`,
+        kind: recordType === "rental" ? "rental-receipt" : "expense-payment",
+        direction: recordType === "rental" ? "inflow" : "outflow",
+        amount: roundMoney(amount),
+        date: form.date.value,
+        paymentMethod: form.paymentMethod.value,
+        notes: form.notes.value.trim(),
+        createdAt: payment?.createdAt || now,
+        updatedAt: now,
+        reconciliationStatus: payment?.reconciliationStatus || "unmatched",
+        bankTransactionId: payment?.bankTransactionId || null,
+        inventoryLines: payment?.inventoryLines || [],
+      };
+      if (payment) {
+        await PlanetaDB.put("payments", payload);
+      } else {
+        delete payload.id;
+        await PlanetaDB.add("payments", payload);
+      }
+      await loadAll();
+      const freshRecord = recordType === "expense" ? getExpense(record.id) : getRental(record.id);
+      if (freshRecord) await syncRecordPaymentStatus(recordType, freshRecord);
+      closeModal();
+      await loadAll();
+      refreshAll();
+      showToast(payment ? "Pagamento atualizado." : "Pagamento registrado.");
+    });
+  }
 
-    return getExpenseDate(expense) < todayISO() ? "overdue" : "pending";
+  async function syncRecordPaymentStatus(recordType, record) {
+    const now = new Date().toISOString();
+    if (recordType === "expense") {
+      const fresh = await PlanetaDB.get("expenses", Number(record.id));
+      if (!fresh) return;
+      const summary = getExpenseSettlement({ ...fresh, id: record.id });
+      await PlanetaDB.put("expenses", { ...fresh, status: summary.status, paidAt: summary.status === "paid" ? now : "", updatedAt: now });
+      return;
+    }
+    const fresh = await PlanetaDB.get("rentals", Number(record.id));
+    if (!fresh) return;
+    const summary = getRentalSettlement({ ...fresh, id: record.id });
+    await PlanetaDB.put("rentals", { ...fresh, paymentStatus: summary.status, paymentReceivedAt: summary.status === "paid" ? now : "", updatedAt: now });
+  }
+
+  function handlePaymentActionClick(event, recordType, record) {
+    const button = event.target.closest("button[data-action]");
+    if (!button) return;
+    if (button.dataset.action === "register-expense-payment") {
+      openRecordPaymentModal("expense", record);
+    } else if (button.dataset.action === "open-offset") {
+      openSupplierOffsetModal(record);
+    } else if (button.dataset.action === "edit-expense") {
+      openExpenseModal(record);
+    } else if (button.dataset.action === "edit-payment") {
+      const payment = state.payments.find((entry) => Number(entry.id) === Number(button.dataset.paymentId));
+      if (payment?.kind === "supplier-offset-sale") openSupplierOffsetModal(getExpense(payment.recordId), payment);
+      else if (payment) openRecordPaymentModal(recordType, record, payment);
+    } else if (button.dataset.action === "delete-payment") {
+      const payment = state.payments.find((entry) => Number(entry.id) === Number(button.dataset.paymentId));
+      if (payment) deletePayment(payment);
+    }
+  }
+
+  function openSupplierOffsetModal(preselectedExpense = null, existingPayment = null) {
+    if (!state.items.length) {
+      alert("Cadastre o item vendido no estoque antes de registrar o abatimento.");
+      return;
+    }
+    const openExpenses = state.expenses.filter((expense) => getExpenseSettlement(expense).remaining > 0 || Number(expense.id) === Number(preselectedExpense?.id));
+    if (!openExpenses.length) {
+      alert("Cadastre ou mantenha uma dívida/parcela pendente para aplicar o abatimento.");
+      return;
+    }
+    const firstItem = existingPayment?.inventoryLines?.[0] || {};
+    openModal(existingPayment ? "Editar abatimento comercial" : "Venda com abatimento ao fornecedor", `
+      <form id="supplierOffsetForm" class="form-grid">
+        <p class="muted-text wide">Esta venda reduz uma dívida, mas não entra como Pix, dinheiro em caixa ou entrada bancária.</p>
+        <label>
+          Produto vendido
+          <select name="itemId">
+            ${state.items.map((item) => `<option value="${item.id}" ${Number(item.id) === Number(firstItem.itemId) ? "selected" : ""}>${escapeHtml(item.name)} (${getSafeSaleAvailability(item)} livres para venda)</option>`).join("")}
+          </select>
+        </label>
+        <label>
+          Quantidade vendida
+          <input name="qty" type="number" min="1" inputmode="numeric" required value="${escapeAttr(firstItem.qty || 1)}">
+        </label>
+        <label>
+          Valor total da venda
+          <input name="amount" type="text" inputmode="decimal" required value="${escapeAttr((existingPayment?.amount || "").toString().replace(".", ","))}">
+        </label>
+        <label>
+          Data da venda
+          <input name="date" type="date" required value="${escapeAttr(existingPayment?.date || todayISO())}">
+        </label>
+        <label>
+          Dívida ou parcela a abater
+          <select name="expenseId">
+            ${openExpenses.map((expense) => `<option value="${expense.id}" ${Number(expense.id) === Number(preselectedExpense?.id || existingPayment?.recordId) ? "selected" : ""}>${escapeHtml(expense.description)} · restante ${formatMoney(getExpenseSettlement(expense).remaining)}</option>`).join("")}
+          </select>
+        </label>
+        <label>
+          Fornecedor
+          <input name="supplier" type="text" value="${escapeAttr(existingPayment?.supplier || preselectedExpense?.supplier || "")}" placeholder="Ex.: fornecedor da compra">
+        </label>
+        <label>
+          Cliente/comprador
+          <input name="buyer" type="text" value="${escapeAttr(existingPayment?.buyer || "")}" placeholder="Opcional">
+        </label>
+        <label>
+          Custo de aquisição por unidade
+          <input name="unitCost" type="text" inputmode="decimal" value="${escapeAttr((firstItem.unitCost || "").toString().replace(".", ","))}" placeholder="Opcional">
+        </label>
+        <label class="wide">
+          Observação
+          <textarea name="notes" rows="3">${escapeHtml(existingPayment?.notes || "")}</textarea>
+        </label>
+        <div class="form-actions wide">
+          <button class="secondary-action" type="button" data-close-modal="true">Cancelar</button>
+          <button class="primary-action" type="submit">${existingPayment ? "Salvar abatimento" : "Registrar venda com abatimento"}</button>
+        </div>
+      </form>
+    `);
+    $("#supplierOffsetForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const item = getItem(Number(form.itemId.value));
+      const expense = state.expenses.find((entry) => Number(entry.id) === Number(form.expenseId.value));
+      const qty = Math.max(0, Math.floor(toNumber(form.qty.value)));
+      const amount = parseMoneyValue(form.amount.value);
+      const unitCost = Math.max(0, parseMoneyValue(form.unitCost.value));
+      const previousQty = existingPayment?.inventoryLines?.[0]?.itemId === item?.id ? toNumber(existingPayment.inventoryLines[0].qty) : 0;
+      const available = getSafeSaleAvailability(item) + previousQty;
+      const previousAmount = existingPayment && Number(existingPayment.recordId) === Number(expense?.id) ? toNumber(existingPayment.amount) : 0;
+      const debtRemaining = getExpenseSettlement(expense).remaining + previousAmount;
+      if (!item || !expense || !qty || !amount || !form.date.value || qty > available) {
+        alert(`Confira os dados. Para ${item?.name || "este item"}, há ${available} unidade(s) que podem ser vendidas sem afetar locações.`);
+        return;
+      }
+      if (amount > debtRemaining + 0.005) {
+        alert(`O abatimento não pode ser maior que o restante desta dívida: ${formatMoney(debtRemaining)}.`);
+        return;
+      }
+      const now = new Date().toISOString();
+      if (existingPayment) {
+        await restoreOffsetInventory(existingPayment);
+      }
+      await PlanetaDB.put("items", { ...item, totalQty: Math.max(0, toNumber(item.totalQty) - qty), updatedAt: now });
+      const payload = {
+        ...(existingPayment || {}),
+        recordType: "expense",
+        recordId: Number(expense.id),
+        recordKey: `expense:${expense.id}`,
+        kind: "supplier-offset-sale",
+        direction: "non-cash-offset",
+        amount: roundMoney(amount),
+        date: form.date.value,
+        paymentMethod: "Compensado com fornecedor",
+        supplier: form.supplier.value.trim(),
+        buyer: form.buyer.value.trim(),
+        notes: form.notes.value.trim(),
+        inventoryLines: [{ itemId: item.id, name: item.name, qty, unitCost }],
+        profit: unitCost ? roundMoney(amount - unitCost * qty) : null,
+        createdAt: existingPayment?.createdAt || now,
+        updatedAt: now,
+        reconciliationStatus: "not-applicable",
+        bankTransactionId: null,
+      };
+      if (existingPayment) await PlanetaDB.put("payments", payload);
+      else { delete payload.id; await PlanetaDB.add("payments", payload); }
+      await loadAll();
+      const freshExpense = getExpense(expense.id);
+      if (freshExpense) await syncRecordPaymentStatus("expense", freshExpense);
+      await loadAll();
+      closeModal();
+      refreshAll();
+      showToast("Venda compensada com a dívida e estoque atualizado.");
+    });
+  }
+
+  async function restoreOffsetInventory(payment) {
+    for (const line of Array.isArray(payment.inventoryLines) ? payment.inventoryLines : []) {
+      const item = getItem(line.itemId) || await PlanetaDB.get("items", Number(line.itemId));
+      if (item) {
+        await PlanetaDB.put("items", { ...item, totalQty: toNumber(item.totalQty) + toNumber(line.qty), updatedAt: new Date().toISOString() });
+      }
+    }
+  }
+
+  async function deletePayment(payment) {
+    const isOffset = payment.kind === "supplier-offset-sale";
+    if (!confirm(`${isOffset ? "Excluir este abatimento e restaurar o estoque vendido" : "Excluir este pagamento"}?`)) return;
+    if (isOffset) await restoreOffsetInventory(payment);
+    await PlanetaDB.remove("payments", Number(payment.id));
+    await loadAll();
+    const record = payment.recordType === "expense" ? getExpense(payment.recordId) : getRental(payment.recordId);
+    if (record && (payment.migrationStatus === "needs-review" || !getRecordPayments(payment.recordType, record.id).length)) {
+      const cleared = payment.recordType === "expense"
+        ? { ...record, status: "pending", paidAt: "", updatedAt: new Date().toISOString() }
+        : { ...record, paymentStatus: "unpaid", paymentReceivedAt: "", updatedAt: new Date().toISOString() };
+      await PlanetaDB.put(payment.recordType === "expense" ? "expenses" : "rentals", cleared);
+    } else if (record) {
+      await syncRecordPaymentStatus(payment.recordType, record);
+    }
+    await loadAll();
+    closeModal();
+    refreshAll();
+    showToast(isOffset ? "Abatimento excluído e estoque restaurado." : "Pagamento excluído.");
+  }
+
+  function getExpense(id) {
+    return state.expenses.find((expense) => Number(expense.id) === Number(id));
   }
 
   function financeTypeForExpense(expense) {
@@ -4955,6 +5472,26 @@
     return moneyFormatter.format(toNumber(value));
   }
 
+  function parseMoneyValue(value) {
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : 0;
+    }
+    let text = String(value ?? "").trim().replace(/\s/g, "");
+    if (!text) return 0;
+    if (/[^\d,.-]/.test(text)) return NaN;
+    const comma = text.lastIndexOf(",");
+    const dot = text.lastIndexOf(".");
+    if (comma >= 0 && dot >= 0) {
+      text = comma > dot ? text.replace(/\./g, "").replace(",", ".") : text.replace(/,/g, "");
+    } else if (comma >= 0) {
+      text = text.replace(",", ".");
+    }
+    const decimals = text.includes(".") ? text.split(".")[1] : "";
+    if (decimals.length > 2 || (text.match(/\./g) || []).length > 1) return NaN;
+    const parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : NaN;
+  }
+
   function toNumber(value) {
     if (typeof value === "number") {
       return Number.isFinite(value) ? value : 0;
@@ -4979,6 +5516,47 @@
     }
 
     return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
+  }
+
+  function formatCnpj(value) {
+    const digits = onlyDigits(value).slice(0, 14);
+    return digits
+      .replace(/^(\d{2})(\d)/, "$1.$2")
+      .replace(/^(\d{2}\.\d{3})(\d)/, "$1.$2")
+      .replace(/(\d{3})(\d)/, "$1/$2")
+      .replace(/(\d{4})(\d)/, "$1-$2");
+  }
+
+  function formatDocument(value) {
+    const digits = onlyDigits(value).slice(0, 14);
+    if (digits.length > 11) {
+      return formatCnpj(digits);
+    }
+
+    return digits
+      .replace(/^(\d{3})(\d)/, "$1.$2")
+      .replace(/^(\d{3}\.\d{3})(\d)/, "$1.$2")
+      .replace(/(\d{3})(\d)/, "$1-$2");
+  }
+
+  function getDocumentLabel(value) {
+    return onlyDigits(value).length === 14 ? "CNPJ" : "CPF";
+  }
+
+  function getDocumentValidationMessage(value) {
+    const digits = onlyDigits(value);
+    if (digits.length === 11) {
+      return "CPF inválido. Confira os dígitos verificadores.";
+    }
+    if (digits.length === 14) {
+      return "CNPJ inválido. Confira os dígitos verificadores.";
+    }
+    return "Informe 11 dígitos para CPF ou 14 dígitos para CNPJ.";
+  }
+
+  function isValidDocument(value) {
+    const digits = onlyDigits(value);
+    return digits.length === 11 ? isValidCpf(digits) : digits.length === 14 ? isValidCnpj(digits) : false;
   }
 
   function isValidCpf(value) {
@@ -5009,6 +5587,23 @@
     }
 
     return secondDigit === Number(cpf[10]);
+  }
+
+  function isValidCnpj(value) {
+    const cnpj = onlyDigits(value);
+    if (cnpj.length !== 14 || /^(\d)\1{13}$/.test(cnpj)) {
+      return false;
+    }
+
+    const calculateDigit = (digits, weights) => {
+      const sum = digits.split("").reduce((total, digit, index) => total + Number(digit) * weights[index], 0);
+      const remainder = sum % 11;
+      return remainder < 2 ? 0 : 11 - remainder;
+    };
+
+    const first = calculateDigit(cnpj.slice(0, 12), [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+    const second = calculateDigit(cnpj.slice(0, 12) + first, [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+    return first === Number(cnpj[12]) && second === Number(cnpj[13]);
   }
 
   function normalize(value) {
