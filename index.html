@@ -10,13 +10,13 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="format-detection" content="telephone=no">
   <title>Planeta Locações</title>
-  <link rel="manifest" href="manifest.json?v=35">
+  <link rel="manifest" href="manifest.json?v=37">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
-  <link rel="stylesheet" href="style.css?v=35">
+  <link rel="stylesheet" href="style.css?v=37">
 </head>
 <body>
   <div class="app-shell">
@@ -91,7 +91,10 @@
             <p class="section-kicker">Itens, forros e conjuntos</p>
             <h2 id="stockTitle">Estoque</h2>
           </div>
-          <button id="newItemBtn" class="primary-action" type="button">Cadastrar item</button>
+          <div class="stock-actions">
+            <button id="newItemBtn" class="primary-action" type="button">Cadastrar produto</button>
+            <button id="newStockEntryBtn" class="secondary-action" type="button">Cadastrar entrada</button>
+          </div>
         </div>
 
         <div class="toolbar">
@@ -298,8 +301,9 @@
             </label>
 
             <label>
-              Sinal
+              Sinal já recebido
               <input id="rentalDeposit" type="number" inputmode="decimal" min="0" step="0.01" value="0">
+              <span class="field-hint">Preencha somente quando o dinheiro já tiver sido recebido.</span>
             </label>
 
             <label>
@@ -623,8 +627,8 @@
   <div id="modalRoot"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="jspdf.umd.min.js?v=35"></script>
-  <script src="db.js?v=35"></script>
-  <script src="app.js?v=35"></script>
+  <script src="jspdf.umd.min.js?v=37"></script>
+  <script src="db.js?v=37"></script>
+  <script src="app.js?v=37"></script>
 </body>
 </html>

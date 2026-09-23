@@ -39,7 +39,7 @@
     "6m": { label: "últimos 6 meses", months: 6 },
     "12m": { label: "últimos 12 meses", months: 12 },
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=35";
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=37";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -56,6 +56,7 @@
 
   const state = {
     items: [],
+    stockMovements: [],
     clients: [],
     rentals: [],
     expenses: [],
@@ -126,6 +127,7 @@
     });
 
     $("#newItemBtn").addEventListener("click", () => openItemModal());
+    $("#newStockEntryBtn").addEventListener("click", () => openStockEntryModal());
     $("#newKitBtn").addEventListener("click", () => openKitModal());
     $("#newClientBtn").addEventListener("click", () => openClientModal());
 
@@ -222,8 +224,9 @@
   }
 
   async function loadAll() {
-    const [items, clients, rentals, expenses, payments, kits] = await Promise.all([
+    const [items, stockMovements, clients, rentals, expenses, payments, kits] = await Promise.all([
       PlanetaDB.getAll("items"),
+      PlanetaDB.getAll("stockMovements"),
       PlanetaDB.getAll("clients"),
       PlanetaDB.getAll("rentals"),
       PlanetaDB.getAll("expenses"),
@@ -232,6 +235,7 @@
     ]);
 
     state.items = items.sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
+    state.stockMovements = stockMovements.sort((a, b) => String(b.date || b.createdAt || "").localeCompare(String(a.date || a.createdAt || "")));
     state.clients = clients.sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
     state.rentals = rentals.sort((a, b) => Number(b.orderNumber) - Number(a.orderNumber));
     state.expenses = expenses.map(normalizeStoredExpense).sort((a, b) => String(getExpenseDate(b)).localeCompare(String(getExpenseDate(a))));
@@ -1316,7 +1320,7 @@
       <div class="totals-row"><span>Desconto</span><strong>${formatMoney(totals.discount)}</strong></div>
       <div class="totals-row"><span>Frete</span><strong>${formatMoney(totals.freight)}</strong></div>
       <div class="totals-row final"><span>Total final</span><strong>${formatMoney(totals.total)}</strong></div>
-      <div class="totals-row"><span>Sinal</span><strong>${formatMoney(totals.deposit)}</strong></div>
+      <div class="totals-row"><span>Sinal já recebido</span><strong>${formatMoney(totals.deposit)}</strong></div>
       <div class="totals-row"><span>Restante</span><strong>${formatMoney(totals.remaining)}</strong></div>
     `;
   }
@@ -1640,7 +1644,7 @@
             <div class="metric"><span>Desconto</span><strong>${formatMoney(totals.discount)}</strong></div>
             <div class="metric"><span>Frete</span><strong>${formatMoney(totals.freight)}</strong></div>
             <div class="metric"><span>Total final</span><strong>${formatMoney(totals.total)}</strong></div>
-            <div class="metric"><span>Sinal</span><strong>${formatMoney(totals.deposit)}</strong></div>
+            <div class="metric"><span>Sinal já recebido</span><strong>${formatMoney(totals.deposit)}</strong></div>
             <div class="metric"><span>Já recebido</span><strong>${formatMoney(settlement.received)}</strong></div>
             <div class="metric"><span>Restante</span><strong>${formatMoney(settlement.remaining)}</strong></div>
             <div class="metric"><span>Forma de pagamento</span><strong>${escapeHtml(rental.paymentMethod || "-")}</strong></div>
@@ -1685,6 +1689,7 @@
   function renderRentalCard(rental) {
     const client = getClient(rental.clientId);
     const totals = getRentalTotals(rental);
+    const settlement = getRentalSettlement(rental);
     const kitSummary = getRentalKitSummary(rental);
     const items = rental.items
       .map((line) => {
@@ -1709,14 +1714,14 @@
           </div>
           <div class="badge-row">
             <span class="badge ${statusClass}">${statusLabel(rental.status)}</span>
-            <span class="badge">${PAYMENT_STATUS[rental.paymentStatus] || rental.paymentStatus}</span>
+            <span class="badge">${PAYMENT_STATUS[settlement.status] || settlement.status}</span>
           </div>
         </div>
         <div class="metric-grid">
           <div class="metric"><span>Total final</span><strong>${formatMoney(totals.total)}</strong></div>
           <div class="metric"><span>Frete</span><strong>${formatMoney(totals.freight)}</strong></div>
-          <div class="metric"><span>Sinal</span><strong>${formatMoney(totals.deposit)}</strong></div>
-          <div class="metric"><span>Restante</span><strong>${formatMoney(totals.remaining)}</strong></div>
+          <div class="metric"><span>Sinal já recebido</span><strong>${formatMoney(totals.deposit)}</strong></div>
+          <div class="metric"><span>Restante</span><strong>${formatMoney(settlement.remaining)}</strong></div>
         </div>
         ${rental.dailyPricing?.enabled ? `<p class="muted-text"><strong>Cobranca por dias ativa:</strong> subtotal ${formatMoney(totals.subtotal)}</p>` : ""}
         ${kitSummary.length ? `<p class="muted-text"><strong>Conjuntos:</strong><br>${kitSummary.map((line) => `${escapeHtml(line.qty)}x ${escapeHtml(line.name)}`).join("<br>")}</p>` : ""}
@@ -1794,7 +1799,7 @@
             <div class="metric"><span>Desconto</span><strong>${formatMoney(totals.discount)}</strong></div>
             <div class="metric"><span>Frete</span><strong>${formatMoney(totals.freight)}</strong></div>
             <div class="metric"><span>Total final</span><strong>${formatMoney(totals.total)}</strong></div>
-            <div class="metric"><span>Sinal</span><strong>${formatMoney(totals.deposit)}</strong></div>
+            <div class="metric"><span>Sinal já recebido</span><strong>${formatMoney(totals.deposit)}</strong></div>
             <div class="metric"><span>Já recebido</span><strong>${formatMoney(settlement.received)}</strong></div>
             <div class="metric"><span>Restante</span><strong>${formatMoney(settlement.remaining)}</strong></div>
           </div>
@@ -1882,6 +1887,11 @@
       const activeUse = state.rentals.some((rental) => ACTIVE_STATUSES.includes(rental.status) && rental.items.some((line) => Number(line.itemId) === id));
       if (activeUse) {
         alert("Este item está em locação ativa. Finalize ou cancele os pedidos antes de excluir.");
+        return;
+      }
+
+      if (getItemStockEntries(id).length) {
+        alert("Este item possui histórico de entradas. Exclua ou corrija as entradas antes de excluir o produto.");
         return;
       }
 
@@ -2563,6 +2573,186 @@
     return { ...payload, id };
   }
 
+  function getItemStockEntries(itemId) {
+    return state.stockMovements
+      .filter((movement) => movement.type === "entry" && Number(movement.itemId) === Number(itemId))
+      .sort((a, b) => String(b.date || b.createdAt || "").localeCompare(String(a.date || a.createdAt || "")));
+  }
+
+  function getMinimumItemTotal(item) {
+    return Math.max(0, toNumber(item?.unavailableQty) + getMaximumCommittedQuantity(item));
+  }
+
+  function canSetItemTotal(item, nextTotal) {
+    const minimum = getMinimumItemTotal(item);
+    if (nextTotal >= minimum) {
+      return true;
+    }
+
+    alert(`Não é possível reduzir ${item.name} para ${nextTotal} unidade(s). São necessárias pelo menos ${minimum} unidade(s) para cobrir itens indisponíveis e locações ativas.`);
+    return false;
+  }
+
+  function openStockEntryModal(entry = null, preselectedItemId = null) {
+    if (!state.items.length) {
+      alert("Cadastre um produto antes de registrar uma entrada.");
+      return;
+    }
+
+    const selectedItemId = Number(entry?.itemId || preselectedItemId || state.items[0].id);
+    const title = entry ? "Corrigir entrada" : "Cadastrar entrada";
+    openModal(title, `
+      <form id="stockEntryForm" class="form-grid">
+        <label class="wide">
+          Produto
+          <select name="itemId" required>
+            ${state.items.map((item) => `<option value="${item.id}" ${Number(item.id) === selectedItemId ? "selected" : ""}>${escapeHtml(item.name)} (total atual: ${toNumber(item.totalQty)})</option>`).join("")}
+          </select>
+        </label>
+        <label>
+          Quantidade recebida
+          <input name="qty" type="number" min="1" step="1" inputmode="numeric" required value="${escapeAttr(entry?.qty ?? "")}">
+        </label>
+        <label>
+          Data da entrada
+          <input name="date" type="date" required value="${escapeAttr(entry?.date || todayISO())}">
+        </label>
+        <label>
+          Fornecedor/origem
+          <input name="supplier" type="text" placeholder="Opcional" value="${escapeAttr(entry?.supplier || "")}">
+        </label>
+        <label class="wide">
+          Observação
+          <textarea name="notes" rows="3" placeholder="Opcional">${escapeHtml(entry?.notes || "")}</textarea>
+        </label>
+        <div class="form-actions wide">
+          <button class="secondary-action" type="button" data-close-modal="true">Cancelar</button>
+          <button class="primary-action" type="submit">${entry ? "Salvar correção" : "Confirmar entrada"}</button>
+        </div>
+      </form>
+    `);
+
+    $("#stockEntryForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const saved = await saveStockEntryFromForm(event.currentTarget, entry);
+      if (!saved) {
+        return;
+      }
+
+      closeModal();
+      await loadAll();
+      refreshAll();
+      showToast(entry ? "Entrada corrigida e estoque atualizado." : "Entrada cadastrada e estoque atualizado.");
+      if (entry) {
+        const item = getItem(saved.itemId);
+        if (item) {
+          openItemDetailsModal(item);
+        }
+      }
+    });
+  }
+
+  async function saveStockEntryFromForm(form, entry = null) {
+    const itemId = Number(form.itemId.value);
+    const targetItem = getItem(itemId);
+    const qty = toNumber(form.qty.value);
+
+    if (!targetItem) {
+      alert("Selecione um produto válido.");
+      return null;
+    }
+
+    if (!Number.isInteger(qty) || qty <= 0) {
+      alert("Informe uma quantidade recebida maior que zero.");
+      return null;
+    }
+
+    if (!form.date.value) {
+      alert("Informe a data da entrada.");
+      return null;
+    }
+
+    const originalItem = entry ? getItem(entry.itemId) : null;
+    if (entry && !originalItem) {
+      alert("O produto original desta entrada não foi encontrado.");
+      return null;
+    }
+
+    const nextTotals = new Map();
+    if (!entry) {
+      nextTotals.set(targetItem.id, toNumber(targetItem.totalQty) + qty);
+    } else if (Number(originalItem.id) === Number(targetItem.id)) {
+      nextTotals.set(targetItem.id, toNumber(targetItem.totalQty) - toNumber(entry.qty) + qty);
+    } else {
+      nextTotals.set(originalItem.id, toNumber(originalItem.totalQty) - toNumber(entry.qty));
+      nextTotals.set(targetItem.id, toNumber(targetItem.totalQty) + qty);
+    }
+
+    for (const [affectedItemId, nextTotal] of nextTotals) {
+      const affectedItem = getItem(affectedItemId);
+      if (!affectedItem || !canSetItemTotal(affectedItem, nextTotal)) {
+        return null;
+      }
+    }
+
+    const now = new Date().toISOString();
+    for (const [affectedItemId, nextTotal] of nextTotals) {
+      const affectedItem = getItem(affectedItemId);
+      await PlanetaDB.put("items", { ...affectedItem, totalQty: nextTotal, updatedAt: now });
+    }
+
+    const payload = {
+      ...(entry || {}),
+      type: "entry",
+      itemId,
+      qty,
+      date: form.date.value,
+      supplier: form.supplier.value.trim(),
+      notes: form.notes.value.trim(),
+      createdAt: entry?.createdAt || now,
+      updatedAt: now,
+    };
+
+    if (entry) {
+      await PlanetaDB.put("stockMovements", payload);
+    } else {
+      delete payload.id;
+      const id = await PlanetaDB.add("stockMovements", payload);
+      payload.id = id;
+    }
+
+    return payload;
+  }
+
+  async function deleteStockEntry(entry) {
+    const item = getItem(entry.itemId);
+    if (!item) {
+      alert("O produto desta entrada não foi encontrado.");
+      return false;
+    }
+
+    const nextTotal = toNumber(item.totalQty) - toNumber(entry.qty);
+    if (!canSetItemTotal(item, nextTotal)) {
+      return false;
+    }
+
+    if (!confirm(`Excluir a entrada de ${entry.qty} unidade(s) de ${item.name}? O total do estoque será reduzido.`)) {
+      return false;
+    }
+
+    const now = new Date().toISOString();
+    await PlanetaDB.put("items", { ...item, totalQty: nextTotal, updatedAt: now });
+    await PlanetaDB.remove("stockMovements", Number(entry.id));
+    await loadAll();
+    refreshAll();
+    showToast("Entrada excluída e estoque atualizado.");
+    const refreshedItem = getItem(item.id);
+    if (refreshedItem) {
+      openItemDetailsModal(refreshedItem);
+    }
+    return true;
+  }
+
   function openItemDetailsModal(item) {
     const stats = getItemStats(item);
     const { startDate, endDate } = getAvailabilityPeriod();
@@ -2586,6 +2776,22 @@
           })
           .join("")
       : emptyState("Nenhuma locação encontrada para este item.");
+    const entries = getItemStockEntries(item.id);
+    const entriesHtml = entries.length
+      ? entries.map((entry) => `
+          <div class="compact-item item-history-row">
+            <div>
+              <strong>+${escapeHtml(entry.qty)} unidade(s) em ${formatDate(entry.date)}</strong>
+              <span>${escapeHtml(entry.supplier || "Origem não informada")}</span>
+              ${entry.notes ? `<span>${escapeHtml(entry.notes)}</span>` : ""}
+            </div>
+            <div class="card-actions compact-actions">
+              <button type="button" data-action="edit-stock-entry" data-entry-id="${entry.id}">Corrigir</button>
+              <button type="button" class="danger-mini" data-action="delete-stock-entry" data-entry-id="${entry.id}">Excluir</button>
+            </div>
+          </div>
+        `).join("")
+      : emptyState("Nenhuma entrada registrada para este item.");
 
     openModal(`Detalhes do item`, `
       <div class="item-detail-modal">
@@ -2593,6 +2799,7 @@
           <button class="tab-btn active" type="button" data-item-tab="info" aria-selected="true">Informacoes</button>
           <button class="tab-btn" type="button" data-item-tab="stock" aria-selected="false">Estoque</button>
           <button class="tab-btn" type="button" data-item-tab="rentals" aria-selected="false">Locacoes</button>
+          <button class="tab-btn" type="button" data-item-tab="entries" aria-selected="false">Entradas</button>
           <button class="tab-btn" type="button" data-item-tab="edit" aria-selected="false">Editar</button>
         </div>
 
@@ -2624,6 +2831,13 @@
 
         <section class="item-tab-panel hidden" data-item-tab-panel="rentals">
           <div class="compact-list">${rentalsHtml}</div>
+        </section>
+
+        <section class="item-tab-panel hidden" data-item-tab-panel="entries">
+          <div class="card-actions">
+            <button class="primary-action" type="button" data-action="add-stock-entry">Cadastrar entrada</button>
+          </div>
+          <div class="compact-list stock-entry-history">${entriesHtml}</div>
         </section>
 
         <section class="item-tab-panel hidden" data-item-tab-panel="edit">
@@ -2700,6 +2914,29 @@
       refreshAll();
       showToast("Item atualizado.");
       openItemDetailsModal(getItem(saved.id || item.id) || saved);
+    });
+
+    $("[data-item-tab-panel='entries']", $("#modalRoot"))?.addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button) {
+        return;
+      }
+
+      if (button.dataset.action === "add-stock-entry") {
+        openStockEntryModal(null, item.id);
+        return;
+      }
+
+      const entry = state.stockMovements.find((movement) => Number(movement.id) === Number(button.dataset.entryId));
+      if (!entry) {
+        return;
+      }
+
+      if (button.dataset.action === "edit-stock-entry") {
+        openStockEntryModal(entry, item.id);
+      } else if (button.dataset.action === "delete-stock-entry") {
+        await deleteStockEntry(entry);
+      }
     });
   }
 
@@ -3020,9 +3257,10 @@
   function buildContractData(rental, client) {
     const itens = buildContractItems(rental);
     const totals = getRentalTotals({ ...rental, items: rental.items || [] });
+    const settlement = getRentalSettlement(rental);
     const valorTotal = totals.total;
     const sinal = totals.deposit;
-    const restante = totals.remaining;
+    const restante = settlement.remaining;
     const longTextSize =
       itens.reduce((sum, item) => sum + String(item.descricao || "").length, 0) +
       String(rental.notes || "").length +
@@ -3223,6 +3461,7 @@
 
   function buildPdfContractData(rental, client) {
     const totals = getRentalTotals({ ...rental, items: rental.items || [] });
+    const settlement = getRentalSettlement(rental);
     const items = buildContractItems(rental).map((item) => ({
       qty: String(item.quantidade || "-"),
       name: String(item.descricao || "Item"),
@@ -3241,7 +3480,7 @@
       period: `${formatDate(rental?.startDate)} a ${formatDate(rental?.endDate)}`,
       eventLocation: String(rental?.eventLocation || "-"),
       items,
-      totals,
+      totals: { ...totals, received: settlement.received, remaining: settlement.remaining },
       notes,
       contentWeight:
         items.reduce((total, item) => total + item.name.length, 0) +
@@ -3449,7 +3688,7 @@
       `Desconto: ${formatMoney(totals.discount)}`,
       `Frete: ${formatMoney(totals.freight)}`,
       `Total final: ${formatMoney(totals.total)}`,
-      `Sinal: ${formatMoney(totals.deposit)}`,
+      `Sinal já recebido: ${formatMoney(totals.deposit)}`,
       `Restante: ${formatMoney(totals.remaining)}`,
     ];
     const lineHeight = unit(3.6);
@@ -3524,6 +3763,7 @@
 
   async function shareReceipt(rental, client) {
     const totals = getRentalTotals(rental);
+    const settlement = getRentalSettlement(rental);
     const text = [
       "Contrato de aluguel - Planeta Locações",
       `Pedido ${rental.orderNumber}`,
@@ -3532,8 +3772,8 @@
       `Subtotal dos itens: ${formatMoney(totals.subtotal)}`,
       `Frete: ${formatMoney(totals.freight)}`,
       `Total: ${formatMoney(totals.total)}`,
-      `Sinal: ${formatMoney(totals.deposit)}`,
-      `Restante: ${formatMoney(totals.remaining)}`,
+      `Sinal já recebido: ${formatMoney(totals.deposit)}`,
+      `Restante: ${formatMoney(settlement.remaining)}`,
       "Pix: gv8407940@gmail.com",
     ].join("\n");
 
@@ -3583,10 +3823,22 @@
   function getRentalSettlement(rental) {
     const total = getRentalTotals(rental).total;
     const records = getRecordPayments("rental", rental?.id);
-    const legacyAmount = !records.length
-      ? (rental?.paymentStatus === "paid" ? total : rental?.paymentStatus === "partial" ? Math.min(total, toNumber(rental?.deposit)) : 0)
-      : 0;
-    const received = Math.min(total, roundMoney(records.reduce((sum, payment) => sum + toNumber(payment.amount), 0) + legacyAmount));
+    const recordedAmount = roundMoney(records.reduce((sum, payment) => sum + toNumber(payment.amount), 0));
+    const deposit = Math.min(total, Math.max(0, toNumber(rental?.deposit)));
+    const preservesLegacyDeposit = records.some((payment) => payment.preservesLegacyDeposit);
+    const hasRecordedDeposit = records.some((payment) =>
+      payment.isDeposit ||
+      payment.legacyType === "deposit" ||
+      payment.source === "rental-deposit" ||
+      /\bsinal\b/i.test(String(payment.notes || ""))
+    ) || (!preservesLegacyDeposit && deposit > 0 && records.some((payment) => Math.abs(toNumber(payment.amount) - deposit) < 0.005));
+    const legacyType = !records.length && rental?.paymentStatus === "paid"
+      ? "full-payment"
+      : deposit > 0 && recordedAmount < total && !hasRecordedDeposit
+        ? "deposit"
+        : null;
+    const legacyAmount = legacyType === "full-payment" ? total : legacyType === "deposit" ? deposit : 0;
+    const received = Math.min(total, roundMoney(recordedAmount + legacyAmount));
     const remaining = Math.max(0, roundMoney(total - received));
     return {
       total,
@@ -3595,7 +3847,13 @@
       remaining,
       status: remaining <= 0 ? "paid" : received > 0 ? "partial" : "unpaid",
       legacyAmount,
+      legacyType,
+      legacyDate: getLegacyRentalReceiptDate(rental),
     };
+  }
+
+  function getLegacyRentalReceiptDate(rental) {
+    return rental?.paymentReceivedAt?.slice(0, 10) || rental?.orderDate || rental?.startDate || todayISO();
   }
 
   function getMaximumCommittedQuantity(item) {
@@ -3623,7 +3881,8 @@
 
   function renderPaymentTimeline(recordType, record) {
     const payments = getRecordPayments(recordType, record.id);
-    const legacyAmount = recordType === "expense" ? getExpenseSettlement(record).legacyAmount : getRentalSettlement(record).legacyAmount;
+    const settlement = recordType === "expense" ? getExpenseSettlement(record) : getRentalSettlement(record);
+    const legacyAmount = settlement.legacyAmount;
     const lines = payments.map((payment) => `
       <div class="payment-timeline-item">
         <div>
@@ -3637,7 +3896,9 @@
         </div>
       </div>`);
     if (legacyAmount > 0) {
-      lines.unshift(`<div class="payment-timeline-item legacy-payment"><div><strong>Migrado - revisar data</strong><span>Registro antigo preservado. Use a revisão para criar um lançamento editável.</span></div><strong>${formatMoney(legacyAmount)}</strong></div>`);
+      const legacyTitle = recordType === "rental" ? "Recebimento antigo a revisar" : "Migrado - revisar data";
+      const legacyDate = recordType === "rental" ? settlement.legacyDate : "";
+      lines.unshift(`<div class="payment-timeline-item legacy-payment"><div><strong>${legacyTitle}</strong><span>${legacyDate ? `${formatDate(legacyDate)} · ` : ""}Registro antigo preservado. Use a revisão para criar um lançamento editável.</span></div><strong>${formatMoney(legacyAmount)}</strong></div>`);
     }
     return lines.length ? `<div class="payment-timeline">${lines.join("")}</div>` : `<p class="muted-text">Nenhum pagamento ou abatimento registrado.</p>`;
   }
@@ -3648,7 +3909,10 @@
       .filter((entry) => entry.amount > 0);
     const rentals = state.rentals
       .filter(isRentalFinancialEntry)
-      .map((rental) => ({ recordType: "rental", record: rental, amount: getRentalSettlement(rental).legacyAmount, date: rental.paymentReceivedAt?.slice(0, 10) || rental.startDate || rental.orderDate }))
+      .map((rental) => {
+        const settlement = getRentalSettlement(rental);
+        return { recordType: "rental", record: rental, amount: settlement.legacyAmount, date: settlement.legacyDate, legacyType: settlement.legacyType };
+      })
       .filter((entry) => entry.amount > 0);
     return [...expenses, ...rentals].sort((a, b) => String(b.date).localeCompare(String(a.date)));
   }
@@ -3666,7 +3930,7 @@
     ].map(([label, value]) => `<article class="kpi-card"><span>${label}</span><strong>${value}</strong></article>`).join("");
     const rows = candidates.map((entry) => `
       <article class="data-card">
-        <div class="card-top"><div><h3 class="card-title">${escapeHtml(entry.recordType === "expense" ? entry.record.description : `Pedido ${entry.record.orderNumber}`)}</h3><p class="card-subtitle">${entry.recordType === "expense" ? "Gasto/parcela" : "Locação"} · data sugerida ${formatDate(entry.date)}</p></div><span class="badge yellow">Migrado - revisar data</span></div>
+        <div class="card-top"><div><h3 class="card-title">${escapeHtml(entry.recordType === "expense" ? entry.record.description : `Pedido ${entry.record.orderNumber}`)}</h3><p class="card-subtitle">${entry.recordType === "expense" ? "Gasto/parcela" : "Locação"} · data sugerida ${formatDate(entry.date)}</p></div><span class="badge yellow">${entry.recordType === "rental" ? "Recebimento antigo a revisar" : "Migrado - revisar data"}</span></div>
         <div class="metric-grid"><div class="metric"><span>Valor a criar no histórico</span><strong>${formatMoney(entry.amount)}</strong></div><div class="metric"><span>Data sugerida</span><strong>${formatDate(entry.date)}</strong></div></div>
         <div class="card-actions"><button class="primary-action" type="button" data-action="migrate-legacy-payment" data-record-type="${entry.recordType}" data-id="${entry.record.id}">Criar pagamento histórico</button><button type="button" data-action="open-review-record" data-record-type="${entry.recordType}" data-id="${entry.record.id}">Abrir detalhes</button></div>
       </article>`).join("");
@@ -3688,7 +3952,7 @@
     const summary = recordType === "expense" ? getExpenseSettlement(record) : getRentalSettlement(record);
     if (!summary.legacyAmount || !confirm(`Criar um lançamento histórico de ${formatMoney(summary.legacyAmount)}? Depois você poderá editar a data, o valor ou dividir em vários pagamentos.`)) return;
     const now = new Date().toISOString();
-    const date = recordType === "expense" ? record.paidAt?.slice(0, 10) || getExpenseDate(record) : record.paymentReceivedAt?.slice(0, 10) || record.startDate || record.orderDate;
+    const date = recordType === "expense" ? record.paidAt?.slice(0, 10) || getExpenseDate(record) : summary.legacyDate;
     await PlanetaDB.add("payments", {
       recordType,
       recordId: Number(record.id),
@@ -3698,7 +3962,9 @@
       amount: summary.legacyAmount,
       date,
       paymentMethod: record.paymentMethod || "Outro",
-      notes: "Migrado - revisar data",
+      notes: recordType === "rental" ? "Recebimento antigo a revisar" : "Migrado - revisar data",
+      isDeposit: recordType === "rental" && summary.legacyType === "deposit",
+      legacyType: recordType === "rental" ? summary.legacyType : null,
       createdAt: now,
       updatedAt: now,
       migrationStatus: "needs-review",
@@ -4007,10 +4273,13 @@
         startDate: rental.startDate, endDate: rental.endDate, rentalTotal: settlement.total,
         paymentStatus: settlement.status,
       };
-      const receipts = settlement.records.length ? settlement.records : settlement.legacyAmount ? [{
-        id: `legacy-rental-${rental.id}`, amount: settlement.legacyAmount, date: rental.paymentReceivedAt?.slice(0, 10) || rental.startDate || rental.orderDate,
-        paymentMethod: rental.paymentMethod || "-", notes: "Migrado - revisar data", legacy: true,
-      }] : [];
+      const receipts = [
+        ...(settlement.legacyAmount ? [{
+          id: `legacy-rental-${rental.id}`, amount: settlement.legacyAmount, date: settlement.legacyDate,
+          paymentMethod: rental.paymentMethod || "-", notes: "Recebimento antigo a revisar", legacy: true,
+        }] : []),
+        ...settlement.records,
+      ];
       receipts.forEach((payment) => movements.push({ ...base, id: `rental-income-${payment.id}`, type: "income", amount: toNumber(payment.amount), date: payment.date, paymentMethod: payment.paymentMethod || "-", notes: payment.notes || "", legacy: payment.legacy }));
       if (settlement.remaining > 0) movements.push({ ...base, id: `rental-receivable-${rental.id}`, type: "pending-income", amount: settlement.remaining, date: rental.startDate || rental.orderDate, paymentMethod: "-", notes: "" });
     });
@@ -5116,7 +5385,7 @@
 
   function openRecordPaymentModal(recordType, record, payment = null) {
     const summary = recordType === "expense" ? getExpenseSettlement(record) : getRentalSettlement(record);
-    if (!payment && summary.legacyAmount > 0) {
+    if (!payment && recordType === "expense" && summary.legacyAmount > 0) {
       alert("Este registro ainda usa um status antigo. Abra Revisar pagamentos e crie o lançamento \"Migrado - revisar data\" antes de adicionar outro pagamento.");
       return;
     }
@@ -5179,6 +5448,7 @@
         reconciliationStatus: payment?.reconciliationStatus || "unmatched",
         bankTransactionId: payment?.bankTransactionId || null,
         inventoryLines: payment?.inventoryLines || [],
+        preservesLegacyDeposit: payment?.preservesLegacyDeposit || (!payment && recordType === "rental" && summary.legacyType === "deposit"),
       };
       if (payment) {
         await PlanetaDB.put("payments", payload);
@@ -5366,7 +5636,7 @@
     if (record && (payment.migrationStatus === "needs-review" || !getRecordPayments(payment.recordType, record.id).length)) {
       const cleared = payment.recordType === "expense"
         ? { ...record, status: "pending", paidAt: "", updatedAt: new Date().toISOString() }
-        : { ...record, paymentStatus: "unpaid", paymentReceivedAt: "", updatedAt: new Date().toISOString() };
+        : { ...record, paymentStatus: getRentalSettlement(record).status, paymentReceivedAt: "", updatedAt: new Date().toISOString() };
       await PlanetaDB.put(payment.recordType === "expense" ? "expenses" : "rentals", cleared);
     } else if (record) {
       await syncRecordPaymentStatus(payment.recordType, record);

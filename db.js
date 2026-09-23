@@ -4,8 +4,8 @@
   const DB_NAME = "planeta-locacoes";
   // Mantem compatibilidade com os dados criados pelas versoes mais recentes do app.
   // Nenhuma store existente e removida ou alterada por esta atualizacao.
-  const DB_VERSION = 6;
-  const STORES = ["items", "clients", "rentals", "expenses", "payments", "kits", "meta"];
+  const DB_VERSION = 7;
+  const STORES = ["items", "stockMovements", "clients", "rentals", "expenses", "payments", "kits", "meta"];
 
   function open() {
     return new Promise((resolve, reject) => {
@@ -22,6 +22,16 @@
           store.createIndex("name", "name", { unique: false });
           store.createIndex("category", "category", { unique: false });
           store.createIndex("color", "color", { unique: false });
+        }
+
+        if (!db.objectStoreNames.contains("stockMovements")) {
+          const store = db.createObjectStore("stockMovements", {
+            keyPath: "id",
+            autoIncrement: true,
+          });
+          store.createIndex("itemId", "itemId", { unique: false });
+          store.createIndex("type", "type", { unique: false });
+          store.createIndex("date", "date", { unique: false });
         }
 
         if (!db.objectStoreNames.contains("clients")) {
@@ -238,6 +248,7 @@
     const rentalIdMap = await mergeRentals(data.stores.rentals || [], clientIdMap, itemIdMap);
     const expenseIdMap = await mergeExpenses(data.stores.expenses || []);
     await mergePayments(data.stores.payments || [], rentalIdMap, expenseIdMap, itemIdMap);
+    await mergeStockMovements(data.stores.stockMovements || [], itemIdMap);
     await setMeta("lastMergedBackupAt", new Date().toISOString());
   }
 
@@ -392,6 +403,25 @@
     }
   }
 
+  async function mergeStockMovements(records, itemIdMap) {
+    const existing = await getAll("stockMovements");
+
+    for (const record of Array.isArray(records) ? records : []) {
+      const payload = {
+        ...record,
+        itemId: itemIdMap.get(record.itemId) || record.itemId,
+      };
+      delete payload.id;
+
+      if (existing.some((movement) => stockMovementKey(movement) === stockMovementKey(payload))) {
+        continue;
+      }
+
+      const id = await add("stockMovements", payload);
+      existing.push({ ...payload, id });
+    }
+  }
+
   function clientKey(client) {
     const document = onlyDigits(client?.document);
     if (document) {
@@ -425,6 +455,10 @@
 
   function paymentKey(payment) {
     return `${payment?.recordType}|${payment?.recordId}|${payment?.kind}|${payment?.date}|${Number(payment?.amount) || 0}|${normalizeKey(payment?.notes)}|${payment?.createdAt || ""}`;
+  }
+
+  function stockMovementKey(movement) {
+    return `${movement?.itemId}|${movement?.type}|${Number(movement?.qty) || 0}|${movement?.date || ""}|${normalizeKey(movement?.supplier)}|${normalizeKey(movement?.notes)}|${movement?.createdAt || ""}`;
   }
 
   function onlyDigits(value) {
