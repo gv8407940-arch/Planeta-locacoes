@@ -39,7 +39,7 @@
     "6m": { label: "últimos 6 meses", months: 6 },
     "12m": { label: "últimos 12 meses", months: 12 },
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=37";
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=38";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -204,7 +204,10 @@
     $("#rentalClientCpf").addEventListener("input", () => {
       const input = $("#rentalClientCpf");
       input.value = formatDocument(onlyDigits(input.value).slice(0, 14));
-      $("#rentalClientId").value = "";
+      // Durante a edição, o cliente já vinculado deve continuar sendo atualizado.
+      if (!$("#rentalId").value) {
+        $("#rentalClientId").value = "";
+      }
       $("#clientMatchInfo").textContent = "";
     });
 
@@ -820,7 +823,7 @@
           <span class="badge">${rentals.length} locação${rentals.length === 1 ? "" : "es"}</span>
         </div>
         <p class="muted-text">
-          ${client.document ? `${getDocumentLabel(client.document)}: ${escapeHtml(client.document)}<br>` : ""}
+          ${client.document ? `${getDocumentLabel(client.document)}: ${escapeHtml(client.document)}<br>` : "Documento pendente<br>"}
           ${client.address ? `Endereço: ${escapeHtml(client.address)}<br>` : ""}
           ${client.notes ? `Obs.: ${escapeHtml(client.notes)}` : ""}
         </p>
@@ -1421,14 +1424,14 @@
       return null;
     }
 
-    if (!isValidDocument(clientCpf)) {
+    if (documentDigits && !isValidDocument(clientCpf)) {
       $("#clientMatchInfo").textContent = getDocumentValidationMessage(clientCpf);
       $("#rentalClientCpf").focus();
       alert("Informe um CPF ou CNPJ válido para continuar a locação.");
       return null;
     }
 
-    $("#rentalClientCpf").value = formatDocument(documentDigits);
+    $("#rentalClientCpf").value = documentDigits ? formatDocument(documentDigits) : "";
 
     if (!orderDate || !startDate || !endDate || endDate < startDate) {
       alert("Informe as datas do pedido, retirada/entrega e devolução corretamente.");
@@ -1485,7 +1488,7 @@
       clientDraft: {
         name: clientName,
         phone: clientPhone,
-        document: formatDocument(documentDigits),
+        document: documentDigits ? formatDocument(documentDigits) : "",
         address: clientAddress,
       },
       orderDate,
@@ -1621,7 +1624,7 @@
           <h4>Dados do cliente</h4>
           <div class="detail-grid">
             <div class="metric"><span>Nome</span><strong>${escapeHtml(client?.name || "-")}</strong></div>
-            <div class="metric"><span>${getDocumentLabel(client?.document)}</span><strong>${escapeHtml(client?.document || "-")}</strong></div>
+            <div class="metric"><span>${client?.document ? getDocumentLabel(client.document) : "CPF/CNPJ"}</span><strong>${client?.document ? escapeHtml(client.document) : "Documento pendente"}</strong></div>
             <div class="metric"><span>Telefone</span><strong>${escapeHtml(client?.phone || "-")}</strong></div>
             <div class="metric"><span>Endereço</span><strong>${escapeHtml(client?.address || "-")}</strong></div>
           </div>
@@ -1776,7 +1779,7 @@
           <h4>Dados do cliente</h4>
           <div class="detail-grid">
             <div class="metric"><span>Nome</span><strong>${escapeHtml(client?.name || "-")}</strong></div>
-            <div class="metric"><span>${getDocumentLabel(client?.document)}</span><strong>${escapeHtml(client?.document || "-")}</strong></div>
+            <div class="metric"><span>${client?.document ? getDocumentLabel(client.document) : "CPF/CNPJ"}</span><strong>${client?.document ? escapeHtml(client.document) : "Documento pendente"}</strong></div>
             <div class="metric"><span>Telefone</span><strong>${escapeHtml(client?.phone || "-")}</strong></div>
             <div class="metric"><span>Endereco</span><strong>${escapeHtml(client?.address || "-")}</strong></div>
           </div>
@@ -2268,7 +2271,9 @@
     $("#rentalClientCpf").value = client?.document || "";
     $("#rentalClientPhone").value = client?.phone || "";
     $("#rentalClientAddress").value = client?.address || "";
-    $("#clientMatchInfo").textContent = client ? `Cliente associado: ${client.name}` : "";
+    $("#clientMatchInfo").textContent = client
+      ? `Cliente associado: ${client.name}${client.document ? "" : " · Documento pendente"}`
+      : "";
     $("#rentalOrderDate").value = rental.orderDate || todayISO();
     $("#rentalStartDate").value = rental.startDate;
     $("#rentalEndDate").value = rental.endDate;
@@ -3268,12 +3273,14 @@
       String(client?.address || "").length +
       String(rental.eventLocation || "").length;
 
+    const documentForContract = formatDocument(client?.document || "") || "______________________________";
+
     return {
       numero_contrato: escapeHtml(rental.orderNumber || "Prévia"),
       data_emissao: formatDate(todayISO()),
       nome_cliente: escapeHtml(client?.name || ""),
       telefone_cliente: escapeHtml(client?.phone || ""),
-      cpf_cnpj: escapeHtml(client?.document || ""),
+      cpf_cnpj: escapeHtml(documentForContract),
       endereco_cliente: escapeHtml(client?.address || ""),
       referencia_endereco: "",
       periodo: escapeHtml(`${formatDate(rental.startDate)} a ${formatDate(rental.endDate)}`),
@@ -3475,7 +3482,7 @@
       issuedAt: formatDate(todayISO()),
       clientName: String(client?.name || "Cliente não encontrado"),
       phone: String(client?.phone || "-"),
-      document: String(client?.document || "-"),
+      document: formatDocument(client?.document || "") || "______________________________",
       address: String(client?.address || "-"),
       period: `${formatDate(rental?.startDate)} a ${formatDate(rental?.endDate)}`,
       eventLocation: String(rental?.eventLocation || "-"),
@@ -3569,7 +3576,7 @@
         { label: "Nome", value: data.clientName, fraction: 0.62 },
         { label: "Telefone", value: data.phone, fraction: 0.38 },
       ],
-      [{ label: "CPF/CNPJ", value: data.document, fraction: 1 }],
+      [{ label: "CPF/CNPJ do locatário", value: data.document, fraction: 1 }],
       [{ label: "Endereço", value: data.address, fraction: 1 }],
     ], innerX, cursor, innerWidth, unit, bottom);
 
@@ -5243,17 +5250,21 @@
   async function ensureRentalClient(clientDraft, currentClientId = null) {
     const now = new Date().toISOString();
     const documentDigits = onlyDigits(clientDraft.document);
-    const existingByDocument = findClientByDocumentDigits(documentDigits);
+    const existingByDocument = documentDigits ? findClientByDocumentDigits(documentDigits) : null;
     const currentClient = currentClientId ? getClient(currentClientId) : null;
-    const canReuseCurrent = currentClient && (!onlyDigits(currentClient.document) || onlyDigits(currentClient.document) === documentDigits);
-    const target = existingByDocument || (canReuseCurrent ? currentClient : null);
+
+    if (currentClient && existingByDocument && Number(existingByDocument.id) !== Number(currentClient.id)) {
+      throw new Error("Este CPF ou CNPJ já pertence a outro cliente cadastrado.");
+    }
+
+    const target = currentClient || existingByDocument || null;
 
     if (target) {
       const payload = {
         ...target,
         name: clientDraft.name || target.name,
         phone: clientDraft.phone || target.phone || "",
-        document: clientDraft.document,
+        document: documentDigits ? formatDocument(documentDigits) : target.document || "",
         address: clientDraft.address || target.address || "",
         updatedAt: now,
       };
@@ -5279,7 +5290,10 @@
     const documentDigits = onlyDigits(cpfInput.value);
     const info = $("#clientMatchInfo");
 
-    $("#rentalClientId").value = "";
+    const isEditingRental = Boolean($("#rentalId").value);
+    if (!isEditingRental) {
+      $("#rentalClientId").value = "";
+    }
     info.textContent = "";
 
     if (!documentDigits) {
@@ -5299,7 +5313,9 @@
       return;
     }
 
-    $("#rentalClientId").value = client.id;
+    if (!isEditingRental) {
+      $("#rentalClientId").value = client.id;
+    }
     if (!$("#rentalClientName").value.trim()) {
       $("#rentalClientName").value = client.name || "";
     }
