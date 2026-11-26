@@ -1,82 +1,89 @@
 # Planeta Locações
 
-Sistema PWA para controle de locações, estoque, clientes, contratos e financeiro da Planeta Locações.
+PWA em JavaScript para gerenciar a locação de mesas, cadeiras, forros e outros itens para eventos, com uso pelo celular, dados locais e acesso offline após o primeiro carregamento.
 
-## Acesse o sistema
+**[Abrir o aplicativo](https://gv8407940-arch.github.io/Planeta-locacoes/)** · **[Instalar no iPhone](INSTALAR_IPHONE_SEM_COMPUTADOR.md)**
 
-[Abra o Planeta Locações](https://gv8407940-arch.github.io/Planeta-locacoes/)
+## O problema que o projeto resolve
 
-## Sobre o projeto
+Organizar uma locação envolve disponibilidade de itens, período de reserva, cliente, frete, pagamentos e contrato. O projeto reúne essas informações em uma aplicação web instalável, sem exigir um computador ligado para guardar os dados.
 
-O Planeta Locações foi desenvolvido para resolver uma necessidade real de controle de aluguel de mesas, cadeiras, forros e itens para eventos.
+## Recursos
 
-A proposta do sistema é permitir que o usuário gerencie reservas e locações diretamente pelo celular, sem depender de computador ligado, servidor próprio ou banco de dados online.
+| Área | Recursos |
+| --- | --- |
+| Estoque | Cadastro de itens, movimentações e controle de disponibilidade. |
+| Locações | Orçamentos, reservas, locações, conjuntos/kits, frete, desconto e sinal. |
+| Clientes e documentos | Cadastro de clientes e geração de contratos de aluguel. |
+| Financeiro | Acompanhamento de pagamentos, valores restantes, gastos, investimentos e parcelas. |
+| Agenda | Próximas entregas, retiradas, buscas e devoluções. |
+| Dados | Exportação e importação manual de backups JSON. |
+| Celular e offline | Manifesto PWA, Service Worker e armazenamento local com IndexedDB. |
 
-O sistema pode ser instalado na tela inicial do iPhone como um aplicativo e funciona offline após o primeiro acesso.
+## Experimente pelo navegador
 
-## Funcionalidades
+1. Abra o [aplicativo publicado](https://gv8407940-arch.github.io/Planeta-locacoes/).
+2. Para explorar o projeto, use cadastros fictícios de itens e clientes.
+3. Cadastre uma locação e acompanhe os valores e a disponibilidade.
+4. Consulte a área de backup para exportar os registros desse navegador.
 
-- Cadastro de estoque individual
-- Controle de quantidade disponível, reservada e alugada
-- Cadastro de clientes
-- Criação de orçamento, reserva e locação
-- Cadastro de conjuntos/kits de locação
-- Adição rápida de conjuntos na locação
-- Controle de frete, desconto, sinal e valor restante
-- Geração de contrato de aluguel
-- Relatório financeiro
-- Controle de gastos, custos, investimentos e parcelas
-- Agenda dos próximos dias
-- Lembretes de reservas
-- Backup, exportação e importação de dados
-- Funcionamento offline como PWA
+Os dados pertencem ao navegador ou aplicativo instalado naquele aparelho. Abrir o mesmo link em outro celular não sincroniza os registros automaticamente.
 
-## Tecnologias utilizadas
+## Tecnologias e decisões
 
-- HTML
-- CSS
-- JavaScript
-- IndexedDB
-- Service Worker
-- PWA
-- GitHub Pages
+- **JavaScript, HTML e CSS:** interface e regras da aplicação.
+- **IndexedDB:** armazenamento de itens, clientes, locações, pagamentos e demais registros no dispositivo.
+- **Service Worker e Cache API:** cache dos arquivos da aplicação para acesso offline.
+- **Web App Manifest:** identidade e abertura em janela de aplicativo.
+- **jsPDF:** apoio à geração de documentos em PDF.
+- **GitHub Pages:** hospedagem estática da versão publicada.
+- **Node.js:** servidor HTTP simples para desenvolvimento local; não é um backend de dados.
 
-## Funcionamento offline
+## Como executar localmente
 
-O sistema utiliza Service Worker para armazenar os arquivos principais em cache.
+Com Node.js instalado, abra um PowerShell na pasta do projeto:
 
-Após o primeiro acesso online, o app pode ser aberto novamente mesmo sem internet.
+~~~powershell
+$env:HOST = "127.0.0.1"
+node servidor-local.js --no-open
+~~~
 
-Os dados são armazenados localmente no próprio navegador ou dispositivo usando IndexedDB.
+Acesse **http://127.0.0.1:8765/index.html?v=39**. Para encerrar, pressione **Ctrl+C**.
 
-## Privacidade dos dados
+Para verificar os recursos PWA, use o endereço publicado em HTTPS ou localhost. Abrir o HTML diretamente como arquivo não reproduz o funcionamento do Service Worker.
 
-O sistema não possui backend e não envia dados para servidor externo.
+## Instalação e funcionamento offline
 
-Clientes, estoque, locações, gastos e contratos ficam salvos localmente no aparelho do usuário.
+No iPhone, abra o endereço publicado no Safari e use **Compartilhar → Adicionar à Tela de Início**. Outros navegadores compatíveis podem oferecer sua própria opção de instalação.
 
-Nenhum dado real de cliente deve ser enviado ao repositório.
+O primeiro acesso precisa de internet para carregar e armazenar os arquivos. O cache permite acessos posteriores offline; os registros permanecem no IndexedDB do aparelho.
 
-## Instalação no iPhone
+## Backup e limites atuais
 
-1. Abra o link do sistema no Safari.
-2. Toque no botão de compartilhar.
-3. Escolha “Adicionar à Tela de Início”.
-4. Abra pelo ícone “Planeta Locações”.
+- A transferência entre aparelhos é manual, por exportação e importação de JSON.
+- A importação oferece opções de mesclar ou substituir registros; confira a opção escolhida.
+- A limpeza dos dados do navegador pode apagar os registros locais. Mantenha cópias de backup fora dele.
+- A aplicação não oferece sincronização automática, contas de usuário ou banco de dados centralizado.
+- O repositório contém o código da aplicação; dados reais de clientes e backups da operação não fazem parte dele.
 
-## Backup
+## Organização do código
 
-O sistema possui uma área de backup para exportar e importar os dados manualmente.
+| Arquivo | Responsabilidade |
+| --- | --- |
+| `index.html` | Estrutura das telas e formulários. |
+| `style.css` | Estilos e adaptação da interface. |
+| `app.js` | Fluxos de locações, estoque, financeiro, contratos e instalação. |
+| `db.js` | Acesso ao IndexedDB e operações de backup. |
+| `manifest.json` | Configuração da PWA. |
+| `service-worker.js` | Cache dos arquivos e atendimento offline. |
+| `servidor-local.js` | Servidor estático para desenvolvimento. |
 
-É recomendado exportar backups periodicamente para evitar perda de dados locais.
+## Evolução planejada
 
-## Objetivo do projeto
+Possíveis próximas melhorias são separar os módulos de `app.js`, documentar os principais fluxos com demonstrações e acrescentar testes de disponibilidade, pagamentos e importação de backups. Esses itens são propostas de evolução.
 
-Este projeto foi criado como uma solução prática para uso real em uma operação de locação de itens para eventos, com foco em:
+## Autor
 
-- uso pelo celular;
-- funcionamento offline;
-- controle simples de estoque;
-- geração de contratos;
-- organização financeira;
-- independência de serviços pagos.
+**Gabriel Victor**, estudante de Engenharia de Software.
+
+[LinkedIn](https://www.linkedin.com/in/gabriel-victor-1a041b3b9/) · [GitHub](https://github.com/gv8407940-arch)
