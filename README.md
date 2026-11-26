@@ -1,82 +1,58 @@
 # Planeta Locações
 
-Sistema PWA para controle de locações, estoque, clientes, contratos e financeiro da Planeta Locações.
+Sistema web para organizar locações de mesas, cadeiras, forros e outros produtos para eventos. Criado para atender a uma necessidade real, com foco no uso pelo celular e no acesso offline.
 
 ## Acesse o sistema
 
-[Abra o Planeta Locações](https://gv8407940-arch.github.io/Planeta-locacoes/)
+[Abrir o Planeta Locações](https://gv8407940-arch.github.io/Planeta-locacoes/)
 
-## Sobre o projeto
-
-O Planeta Locações foi desenvolvido para resolver uma necessidade real de controle de aluguel de mesas, cadeiras, forros e itens para eventos.
-
-A proposta do sistema é permitir que o usuário gerencie reservas e locações diretamente pelo celular, sem depender de computador ligado, servidor próprio ou banco de dados online.
-
-O sistema pode ser instalado na tela inicial do iPhone como um aplicativo e funciona offline após o primeiro acesso.
+O projeto pode ser instalado na tela inicial do celular como um aplicativo web progressivo (PWA), sem precisar de uma loja de aplicativos.
 
 ## Funcionalidades
 
-- Cadastro de estoque individual
-- Controle de quantidade disponível, reservada e alugada
-- Cadastro de clientes
-- Criação de orçamento, reserva e locação
-- Cadastro de conjuntos/kits de locação
-- Adição rápida de conjuntos na locação
-- Controle de frete, desconto, sinal e valor restante
-- Geração de contrato de aluguel
-- Relatório financeiro
-- Controle de gastos, custos, investimentos e parcelas
-- Agenda dos próximos dias
-- Lembretes de reservas
-- Backup, exportação e importação de dados
-- Funcionamento offline como PWA
+- Cadastro de produtos, clientes e conjuntos de locação.
+- Consulta de disponibilidade por data ou período, considerando reservas e locações.
+- Registro de entradas e vendas de produtos no estoque.
+- Controle de devoluções, itens danificados e manutenção.
+- Criação de orçamentos, reservas e locações, com desconto, frete e sinal.
+- Cadastro de cliente com CPF ou CNPJ opcional, validado quando informado.
+- Geração de contrato para impressão ou PDF.
+- Agenda e lembretes de reservas próximas.
+- Controle de gastos, investimentos, parcelas e pagamentos parciais.
+- Acompanhamento de valores a receber e relatório financeiro por período.
+- Registro de abatamentos comerciais vinculados a dívidas com fornecedores.
+- Exportação e importação manual de backup.
 
-## Tecnologias utilizadas
+As funcionalidades dependem da versão publicada. Alterações feitas no computador só chegam ao site depois de serem enviadas ao GitHub e publicadas pelo GitHub Pages.
 
-- HTML
-- CSS
-- JavaScript
-- IndexedDB
-- Service Worker
-- PWA
-- GitHub Pages
+## Como funciona
 
-## Funcionamento offline
+O sistema usa HTML, CSS e JavaScript. Os dados são armazenados no navegador ou aplicativo instalado, usando IndexedDB. O service worker armazena arquivos necessários para permitir o uso offline após o primeiro acesso online e o carregamento completo do aplicativo.
 
-O sistema utiliza Service Worker para armazenar os arquivos principais em cache.
+O GitHub Pages disponibiliza os arquivos do sistema; ele não funciona como banco de dados das locações. O aplicativo não exige um computador ligado durante o uso no celular.
 
-Após o primeiro acesso online, o app pode ser aberto novamente mesmo sem internet.
+## Instalar no iPhone
 
-Os dados são armazenados localmente no próprio navegador ou dispositivo usando IndexedDB.
+1. Abra o [sistema](https://gv8407940-arch.github.io/Planeta-locacoes/) no Safari, com internet.
+2. Toque em **Compartilhar** e selecione **Adicionar à Tela de Início**.
+3. Abra o aplicativo pelo novo ícone e aguarde o carregamento.
+4. Teste o funcionamento em modo avião antes de depender do acesso offline.
 
-## Privacidade dos dados
+## Dados e backups
 
-O sistema não possui backend e não envia dados para servidor externo.
+- Os dados ficam no aparelho e não são sincronizados automaticamente entre celular e computador. Para transferi-los, use a exportação e importação de backup.
+- Exporte backups regularmente e guarde cópias em local seguro. Eles podem conter dados pessoais de clientes.
+- Remover o aplicativo, limpar os dados do navegador ou perder o aparelho pode causar perda de informações locais. Não dependa do cache como backup.
+- O repositório é público. Não envie backups, documentos de clientes, senhas ou outros dados pessoais para o GitHub.
 
-Clientes, estoque, locações, gastos e contratos ficam salvos localmente no aparelho do usuário.
+## Tecnologias
 
-Nenhum dado real de cliente deve ser enviado ao repositório.
+- HTML, CSS e JavaScript
+- IndexedDB para armazenamento local
+- Service worker e Web App Manifest para recursos de PWA
+- Git e GitHub para versionamento
+- GitHub Pages para publicação
 
-## Instalação no iPhone
+## Executar no computador
 
-1. Abra o link do sistema no Safari.
-2. Toque no botão de compartilhar.
-3. Escolha “Adicionar à Tela de Início”.
-4. Abra pelo ícone “Planeta Locações”.
-
-## Backup
-
-O sistema possui uma área de backup para exportar e importar os dados manualmente.
-
-É recomendado exportar backups periodicamente para evitar perda de dados locais.
-
-## Objetivo do projeto
-
-Este projeto foi criado como uma solução prática para uso real em uma operação de locação de itens para eventos, com foco em:
-
-- uso pelo celular;
-- funcionamento offline;
-- controle simples de estoque;
-- geração de contratos;
-- organização financeira;
-- independência de serviços pagos.
+O endereço público acima é a forma mais simples de abrir o sistema. Para desenvolvimento local, o projeto também inclui `servidor-local.js` e arquivos para iniciar o site no Windows. Um servidor local é útil para testar recursos de PWA; ele não é necessário para usar a versão publicada no celular.

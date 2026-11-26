@@ -28,6 +28,7 @@
   const FINANCE_TYPE = {
     income: "Entrada",
     "pending-income": "A receber",
+    "product-sale": "Venda de produto",
     "paid-expense": "Gasto pago",
     "pending-expense": "Gasto pendente",
     "future-expense": "Gasto futuro",
@@ -39,7 +40,7 @@
     "6m": { label: "últimos 6 meses", months: 6 },
     "12m": { label: "últimos 12 meses", months: 12 },
   };
-  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=38";
+  const CONTRACT_TEMPLATE_URL = "contrato_aluguel_planeta_locacoes_template.html?v=39";
   const CONTRACT_PIX = "gv8407940@gmail.com";
   const CONTRACT_PIX_HOLDER = "Gabriel Victor Souza Silva";
   const DEMO_ITEM_NAMES = [
@@ -128,6 +129,7 @@
 
     $("#newItemBtn").addEventListener("click", () => openItemModal());
     $("#newStockEntryBtn").addEventListener("click", () => openStockEntryModal());
+    $("#newStockSaleBtn").addEventListener("click", () => openStockSaleModal());
     $("#newKitBtn").addEventListener("click", () => openKitModal());
     $("#newClientBtn").addEventListener("click", () => openClientModal());
 
@@ -1893,8 +1895,8 @@
         return;
       }
 
-      if (getItemStockEntries(id).length) {
-        alert("Este item possui histórico de entradas. Exclua ou corrija as entradas antes de excluir o produto.");
+      if (getItemStockEntries(id).length || getItemStockSales(id).length) {
+        alert("Este item possui histórico de entradas ou vendas. Corrija esses movimentos antes de excluir o produto.");
         return;
       }
 
@@ -2584,6 +2586,12 @@
       .sort((a, b) => String(b.date || b.createdAt || "").localeCompare(String(a.date || a.createdAt || "")));
   }
 
+  function getItemStockSales(itemId) {
+    return state.stockMovements
+      .filter((movement) => movement.type === "sale" && Number(movement.itemId) === Number(itemId))
+      .sort((a, b) => String(b.date || b.createdAt || "").localeCompare(String(a.date || a.createdAt || "")));
+  }
+
   function getMinimumItemTotal(item) {
     return Math.max(0, toNumber(item?.unavailableQty) + getMaximumCommittedQuantity(item));
   }
@@ -2758,6 +2766,343 @@
     return true;
   }
 
+  function moneyInputValue(value) {
+    return Number.isFinite(toNumber(value)) ? roundMoney(value).toFixed(2).replace(".", ",") : "";
+  }
+
+  function openStockSaleModal(sale = null, preselectedItemId = null) {
+    if (!state.items.length) {
+      alert("Cadastre um produto antes de registrar uma venda.");
+      return;
+    }
+
+    const selectedItem = getItem(Number(sale?.itemId || preselectedItemId)) || state.items[0];
+    const selectedItemId = Number(selectedItem.id);
+    const qty = Math.max(1, Math.floor(toNumber(sale?.qty || 1)));
+    const unitPrice = sale?.unitPrice ?? selectedItem.defaultPrice ?? 0;
+    const amount = sale?.amount ?? roundMoney(qty * toNumber(unitPrice));
+    const receiptType = sale?.receiptType || "cash";
+    const linkedPayment = sale?.paymentId ? state.payments.find((payment) => Number(payment.id) === Number(sale.paymentId)) : null;
+    const selectedExpenseId = Number(sale?.expenseId || (linkedPayment?.recordType === "expense" ? linkedPayment.recordId : 0));
+    const availableExpenses = state.expenses.filter((expense) => getExpenseSettlement(expense).remaining > 0 || Number(expense.id) === selectedExpenseId);
+
+    openModal(sale ? "Editar venda de produto" : "Registrar venda de produto", `
+      <form id="stockSaleForm" class="form-grid">
+        <label class="wide">
+          Produto vendido
+          <select name="itemId" required>
+            ${state.items.map((item) => `<option value="${item.id}" ${Number(item.id) === selectedItemId ? "selected" : ""}>${escapeHtml(item.name)} (${getSafeSaleAvailability(item)} livre${getSafeSaleAvailability(item) === 1 ? "" : "s"} para venda)</option>`).join("")}
+          </select>
+        </label>
+        <label>
+          Quantidade vendida
+          <input name="qty" type="number" min="1" step="1" inputmode="numeric" required value="${qty}">
+        </label>
+        <label>
+          Valor total da venda
+          <input name="amount" type="text" inputmode="decimal" required value="${escapeAttr(moneyInputValue(amount))}">
+        </label>
+        <label>
+          Valor unitário
+          <input name="unitPrice" type="text" inputmode="decimal" required value="${escapeAttr(moneyInputValue(unitPrice))}">
+        </label>
+        <label>
+          Data da venda
+          <input name="date" type="date" required value="${escapeAttr(sale?.date || todayISO())}">
+        </label>
+        <label>
+          Comprador
+          <input name="buyer" type="text" placeholder="Opcional" value="${escapeAttr(sale?.buyer || "")}">
+        </label>
+        <label>
+          Forma de recebimento
+          <select name="paymentMethod">
+            ${["Pix", "Dinheiro", "Cartão", "Outro"].map((method) => `<option ${method === (sale?.paymentMethod || "Pix") ? "selected" : ""}>${method}</option>`).join("")}
+          </select>
+        </label>
+        <label>
+          Tipo de recebimento
+          <select name="receiptType">
+            <option value="cash" ${receiptType === "cash" ? "selected" : ""}>Recebido em caixa/conta</option>
+            <option value="receivable" ${receiptType === "receivable" ? "selected" : ""}>A receber</option>
+            <option value="supplier-offset" ${receiptType === "supplier-offset" ? "selected" : ""}>Abatimento com fornecedor</option>
+          </select>
+        </label>
+        <div class="wide form-grid sale-offset-fields ${receiptType === "supplier-offset" ? "" : "hidden"}">
+          <label>
+            Dívida ou parcela a abater
+            <select name="expenseId">
+              <option value="">Selecione</option>
+              ${availableExpenses.map((expense) => `<option value="${expense.id}" ${Number(expense.id) === selectedExpenseId ? "selected" : ""}>${escapeHtml(expense.description)} · restante ${formatMoney(getExpenseSettlement(expense).remaining)}</option>`).join("")}
+            </select>
+          </label>
+          <label>
+            Fornecedor
+            <input name="supplier" type="text" placeholder="Opcional" value="${escapeAttr(sale?.supplier || linkedPayment?.supplier || "")}">
+          </label>
+          <p class="muted-text wide">O abatimento reduz a dívida escolhida, mas não entra como dinheiro em caixa ou na conta.</p>
+        </div>
+        <label class="wide">
+          Observação
+          <textarea name="notes" rows="3" placeholder="Opcional">${escapeHtml(sale?.notes || "")}</textarea>
+        </label>
+        <div class="form-actions wide">
+          <button class="secondary-action" type="button" data-close-modal="true">Cancelar</button>
+          <button class="primary-action" type="submit">${sale ? "Salvar venda" : "Confirmar venda"}</button>
+        </div>
+      </form>
+    `);
+
+    const form = $("#stockSaleForm");
+    const itemInput = form.elements.itemId;
+    const qtyInput = form.elements.qty;
+    const amountInput = form.elements.amount;
+    const unitPriceInput = form.elements.unitPrice;
+    const receiptTypeInput = form.elements.receiptType;
+    const offsetFields = $(".sale-offset-fields", form);
+    let unitPriceWasEdited = Boolean(sale);
+
+    const selectedSaleItem = () => getItem(Number(itemInput.value));
+    const updateUnitPriceFromAmount = () => {
+      const formQty = Math.floor(toNumber(qtyInput.value));
+      const formAmount = parseMoneyValue(amountInput.value);
+      if (formQty > 0 && Number.isFinite(formAmount) && formAmount >= 0) {
+        unitPriceInput.value = moneyInputValue(formAmount / formQty);
+      }
+    };
+    const updateAmountFromUnitPrice = () => {
+      const formQty = Math.floor(toNumber(qtyInput.value));
+      const formUnitPrice = parseMoneyValue(unitPriceInput.value);
+      if (formQty > 0 && Number.isFinite(formUnitPrice) && formUnitPrice >= 0) {
+        amountInput.value = moneyInputValue(formUnitPrice * formQty);
+      }
+    };
+    const toggleOffsetFields = () => {
+      offsetFields.classList.toggle("hidden", receiptTypeInput.value !== "supplier-offset");
+    };
+
+    itemInput.addEventListener("change", () => {
+      const item = selectedSaleItem();
+      unitPriceWasEdited = false;
+      unitPriceInput.value = moneyInputValue(item?.defaultPrice || 0);
+      updateAmountFromUnitPrice();
+    });
+    qtyInput.addEventListener("input", () => {
+      if (unitPriceWasEdited) updateAmountFromUnitPrice();
+      else updateUnitPriceFromAmount();
+    });
+    amountInput.addEventListener("input", () => {
+      unitPriceWasEdited = false;
+      updateUnitPriceFromAmount();
+    });
+    unitPriceInput.addEventListener("input", () => {
+      unitPriceWasEdited = true;
+      updateAmountFromUnitPrice();
+    });
+    receiptTypeInput.addEventListener("change", toggleOffsetFields);
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const saved = await saveStockSaleFromForm(event.currentTarget, sale);
+      if (!saved) return;
+      closeModal();
+      await loadAll();
+      refreshAll();
+      showToast(sale ? "Venda atualizada." : "Venda registrada e estoque atualizado.");
+      if (sale) {
+        const item = getItem(saved.itemId);
+        if (item) openItemDetailsModal(item);
+      }
+    });
+  }
+
+  async function saveStockSaleFromForm(form, sale = null) {
+    const item = getItem(Number(form.itemId.value));
+    const originalItem = sale ? getItem(Number(sale.itemId)) : null;
+    const qty = Math.floor(toNumber(form.qty.value));
+    const amount = parseMoneyValue(form.amount.value);
+    const unitPrice = parseMoneyValue(form.unitPrice.value);
+    const receiptType = form.receiptType.value;
+    const expense = receiptType === "supplier-offset" ? getExpense(Number(form.expenseId.value)) : null;
+    const existingPayment = sale?.paymentId ? state.payments.find((payment) => Number(payment.id) === Number(sale.paymentId)) : null;
+
+    if (!item || (sale && !originalItem) || !Number.isInteger(qty) || qty <= 0 || !Number.isFinite(amount) || amount <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0 || !form.date.value) {
+      alert("Confira produto, quantidade, valores e data da venda.");
+      return null;
+    }
+    if (!["cash", "receivable", "supplier-offset"].includes(receiptType)) {
+      alert("Selecione um tipo de recebimento válido.");
+      return null;
+    }
+    if (receiptType === "supplier-offset" && !expense) {
+      alert("Selecione a dívida ou parcela que receberá o abatimento.");
+      return null;
+    }
+
+    const previousQtyForTarget = sale && Number(sale.itemId) === Number(item.id) ? toNumber(sale.qty) : 0;
+    const available = getSafeSaleAvailability(item) + previousQtyForTarget;
+    if (qty > available) {
+      alert(`Não é possível vender ${qty} unidade(s) de ${item.name}. Há ${available} unidade(s) livres após considerar manutenção e reservas ativas.`);
+      return null;
+    }
+
+    const previousOffsetAmount = existingPayment?.kind === "supplier-offset-sale" && Number(existingPayment.recordId) === Number(expense?.id)
+      ? toNumber(existingPayment.amount)
+      : 0;
+    if (expense) {
+      const debtRemaining = getExpenseSettlement(expense).remaining + previousOffsetAmount;
+      if (amount > debtRemaining + 0.005) {
+        alert(`O abatimento não pode ser maior que o restante da dívida: ${formatMoney(debtRemaining)}.`);
+        return null;
+      }
+    }
+
+    const nextTotals = new Map();
+    if (sale && Number(originalItem.id) !== Number(item.id)) {
+      nextTotals.set(originalItem.id, toNumber(originalItem.totalQty) + toNumber(sale.qty));
+      nextTotals.set(item.id, toNumber(item.totalQty) - qty);
+    } else {
+      nextTotals.set(item.id, toNumber(item.totalQty) + previousQtyForTarget - qty);
+    }
+    for (const [itemId, nextTotal] of nextTotals) {
+      const affectedItem = getItem(itemId);
+      if (!affectedItem || !canSetItemTotal(affectedItem, nextTotal)) return null;
+    }
+
+    const now = new Date().toISOString();
+    for (const [itemId, nextTotal] of nextTotals) {
+      const affectedItem = getItem(itemId);
+      await PlanetaDB.put("items", { ...affectedItem, totalQty: nextTotal, updatedAt: now });
+    }
+
+    let payload = {
+      ...(sale || {}),
+      type: "sale",
+      itemId: item.id,
+      itemName: item.name,
+      qty,
+      amount: roundMoney(amount),
+      unitPrice: roundMoney(unitPrice),
+      date: form.date.value,
+      buyer: form.buyer.value.trim(),
+      paymentMethod: form.paymentMethod.value,
+      receiptType,
+      expenseId: expense?.id || null,
+      supplier: form.supplier?.value.trim() || "",
+      notes: form.notes.value.trim(),
+      createdAt: sale?.createdAt || now,
+      updatedAt: now,
+    };
+
+    if (sale) {
+      await PlanetaDB.put("stockMovements", payload);
+    } else {
+      delete payload.id;
+      const id = await PlanetaDB.add("stockMovements", payload);
+      payload.id = id;
+    }
+
+    if (receiptType === "receivable") {
+      if (existingPayment) await PlanetaDB.remove("payments", Number(existingPayment.id));
+      payload.paymentId = null;
+    } else {
+      const paymentPayload = receiptType === "supplier-offset"
+        ? {
+            ...(existingPayment || {}),
+            recordType: "expense",
+            recordId: Number(expense.id),
+            recordKey: `expense:${expense.id}`,
+            kind: "supplier-offset-sale",
+            direction: "non-cash-offset",
+            amount: roundMoney(amount),
+            date: form.date.value,
+            paymentMethod: "Compensado com fornecedor",
+            supplier: payload.supplier,
+            buyer: payload.buyer,
+            notes: payload.notes,
+            inventoryLines: [{ itemId: item.id, name: item.name, qty, unitPrice: roundMoney(unitPrice) }],
+            stockMovementId: payload.id,
+            createdAt: existingPayment?.createdAt || now,
+            updatedAt: now,
+            reconciliationStatus: "not-applicable",
+            bankTransactionId: null,
+          }
+        : {
+            ...(existingPayment || {}),
+            recordType: "product-sale",
+            recordId: Number(payload.id),
+            recordKey: `product-sale:${payload.id}`,
+            kind: "product-sale-receipt",
+            direction: "inflow",
+            amount: roundMoney(amount),
+            date: form.date.value,
+            paymentMethod: payload.paymentMethod,
+            supplier: "",
+            buyer: payload.buyer,
+            notes: payload.notes,
+            inventoryLines: [{ itemId: item.id, name: item.name, qty, unitPrice: roundMoney(unitPrice) }],
+            stockMovementId: payload.id,
+            createdAt: existingPayment?.createdAt || now,
+            updatedAt: now,
+            reconciliationStatus: "unmatched",
+            bankTransactionId: null,
+          };
+      if (existingPayment) {
+        await PlanetaDB.put("payments", paymentPayload);
+        payload.paymentId = existingPayment.id;
+      } else {
+        delete paymentPayload.id;
+        const paymentId = await PlanetaDB.add("payments", paymentPayload);
+        payload.paymentId = paymentId;
+      }
+    }
+
+    await PlanetaDB.put("stockMovements", payload);
+    await loadAll();
+    const affectedExpenseIds = new Set([
+      existingPayment?.recordType === "expense" ? Number(existingPayment.recordId) : 0,
+      expense?.id ? Number(expense.id) : 0,
+    ]);
+    for (const expenseId of affectedExpenseIds) {
+      if (!expenseId) continue;
+      const freshExpense = getExpense(expenseId);
+      if (freshExpense) await syncRecordPaymentStatus("expense", freshExpense);
+    }
+    await loadAll();
+    return payload;
+  }
+
+  async function deleteStockSale(sale) {
+    const item = getItem(sale.itemId);
+    if (!item) {
+      alert("O produto desta venda não foi encontrado.");
+      return false;
+    }
+    if (!confirm(`Cancelar a venda de ${sale.qty} unidade(s) de ${item.name}? A quantidade voltará ao estoque e o reflexo financeiro será revertido.`)) {
+      return false;
+    }
+
+    const payment = sale.paymentId
+      ? state.payments.find((entry) => Number(entry.id) === Number(sale.paymentId))
+      : state.payments.find((entry) => Number(entry.stockMovementId) === Number(sale.id));
+    const affectedExpenseId = payment?.recordType === "expense" ? Number(payment.recordId) : 0;
+    const now = new Date().toISOString();
+    await PlanetaDB.put("items", { ...item, totalQty: toNumber(item.totalQty) + toNumber(sale.qty), updatedAt: now });
+    if (payment) await PlanetaDB.remove("payments", Number(payment.id));
+    await PlanetaDB.remove("stockMovements", Number(sale.id));
+    await loadAll();
+    if (affectedExpenseId) {
+      const expense = getExpense(affectedExpenseId);
+      if (expense) await syncRecordPaymentStatus("expense", expense);
+    }
+    await loadAll();
+    refreshAll();
+    showToast("Venda cancelada, estoque e financeiro restaurados.");
+    const refreshedItem = getItem(item.id);
+    if (refreshedItem) openItemDetailsModal(refreshedItem);
+    return true;
+  }
+
   function openItemDetailsModal(item) {
     const stats = getItemStats(item);
     const { startDate, endDate } = getAvailabilityPeriod();
@@ -2797,6 +3142,30 @@
           </div>
         `).join("")
       : emptyState("Nenhuma entrada registrada para este item.");
+    const sales = getItemStockSales(item.id);
+    const salesHtml = sales.length
+      ? sales.map((sale) => {
+          const receiptLabel = sale.receiptType === "cash"
+            ? "Recebido em caixa/conta"
+            : sale.receiptType === "supplier-offset"
+              ? "Abatimento com fornecedor"
+              : "A receber";
+          return `
+            <div class="compact-item item-history-row">
+              <div>
+                <strong>-${escapeHtml(sale.qty)} unidade(s) em ${formatDate(sale.date)}</strong>
+                <span>${formatMoney(sale.amount)} · ${escapeHtml(receiptLabel)}</span>
+                <span>${escapeHtml(sale.buyer || "Comprador não informado")}${sale.supplier ? ` · fornecedor: ${escapeHtml(sale.supplier)}` : ""}</span>
+                ${sale.notes ? `<span>${escapeHtml(sale.notes)}</span>` : ""}
+              </div>
+              <div class="card-actions compact-actions">
+                <button type="button" data-action="edit-stock-sale" data-sale-id="${sale.id}">Editar</button>
+                <button type="button" class="danger-mini" data-action="delete-stock-sale" data-sale-id="${sale.id}">Cancelar</button>
+              </div>
+            </div>
+          `;
+        }).join("")
+      : emptyState("Nenhuma venda registrada para este item.");
 
     openModal(`Detalhes do item`, `
       <div class="item-detail-modal">
@@ -2805,6 +3174,7 @@
           <button class="tab-btn" type="button" data-item-tab="stock" aria-selected="false">Estoque</button>
           <button class="tab-btn" type="button" data-item-tab="rentals" aria-selected="false">Locacoes</button>
           <button class="tab-btn" type="button" data-item-tab="entries" aria-selected="false">Entradas</button>
+          <button class="tab-btn" type="button" data-item-tab="sales" aria-selected="false">Vendas</button>
           <button class="tab-btn" type="button" data-item-tab="edit" aria-selected="false">Editar</button>
         </div>
 
@@ -2816,6 +3186,9 @@
             <div class="metric"><span>Valor padrao</span><strong>${formatMoney(item.defaultPrice || 0)}</strong></div>
           </div>
           <p class="muted-text detail-note">${escapeHtml(item.notes || "Sem observacoes.")}</p>
+          <div class="card-actions">
+            <button class="primary-action" type="button" data-action="add-stock-sale">Registrar venda</button>
+          </div>
         </section>
 
         <section class="item-tab-panel hidden" data-item-tab-panel="stock">
@@ -2843,6 +3216,13 @@
             <button class="primary-action" type="button" data-action="add-stock-entry">Cadastrar entrada</button>
           </div>
           <div class="compact-list stock-entry-history">${entriesHtml}</div>
+        </section>
+
+        <section class="item-tab-panel hidden" data-item-tab-panel="sales">
+          <div class="card-actions">
+            <button class="primary-action" type="button" data-action="add-stock-sale">Registrar venda</button>
+          </div>
+          <div class="compact-list stock-entry-history">${salesHtml}</div>
         </section>
 
         <section class="item-tab-panel hidden" data-item-tab-panel="edit">
@@ -2921,6 +3301,11 @@
       openItemDetailsModal(getItem(saved.id || item.id) || saved);
     });
 
+    $("[data-item-tab-panel='info']", $("#modalRoot"))?.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-action='add-stock-sale']");
+      if (button) openStockSaleModal(null, item.id);
+    });
+
     $("[data-item-tab-panel='entries']", $("#modalRoot"))?.addEventListener("click", async (event) => {
       const button = event.target.closest("button[data-action]");
       if (!button) {
@@ -2941,6 +3326,25 @@
         openStockEntryModal(entry, item.id);
       } else if (button.dataset.action === "delete-stock-entry") {
         await deleteStockEntry(entry);
+      }
+    });
+
+    $("[data-item-tab-panel='sales']", $("#modalRoot"))?.addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button) return;
+
+      if (button.dataset.action === "add-stock-sale") {
+        openStockSaleModal(null, item.id);
+        return;
+      }
+
+      const sale = state.stockMovements.find((movement) => Number(movement.id) === Number(button.dataset.saleId) && movement.type === "sale");
+      if (!sale) return;
+
+      if (button.dataset.action === "edit-stock-sale") {
+        openStockSaleModal(sale, item.id);
+      } else if (button.dataset.action === "delete-stock-sale") {
+        await deleteStockSale(sale);
       }
     });
   }
@@ -4077,6 +4481,7 @@
   function renderFinanceFilters() {
     const categories = uniqueValues([
       "Locações",
+      "Venda de produtos",
       ...state.expenses.map((expense) => expense.category || "Sem categoria"),
     ]);
     fillSelect($("#financeCategoryFilter"), categories, "Todas");
@@ -4098,6 +4503,9 @@
       .reduce((sum, movement) => sum + movement.amount, 0);
     const supplierOffsetTotal = movements
       .filter((movement) => movement.type === "supplier-offset")
+      .reduce((sum, movement) => sum + movement.amount, 0);
+    const productSalesTotal = movements
+      .filter((movement) => movement.source === "product-sale")
       .reduce((sum, movement) => sum + movement.amount, 0);
     const offsetProfitTotal = movements
       .filter((movement) => movement.type === "supplier-offset" && Number.isFinite(toNumber(movement.profit)))
@@ -4121,6 +4529,7 @@
     $("#financeStats").innerHTML = [
       ["Entradas reais de caixa", formatMoney(incomeTotal)],
       ["Saídas reais de caixa", formatMoney(paidExpenseTotal)],
+      ["Vendas de produtos", formatMoney(productSalesTotal)],
       ["Vendas com abatimento", formatMoney(supplierOffsetTotal)],
       ["Abatimentos em dívidas", formatMoney(supplierOffsetTotal)],
       ["Lucro das vendas informado", formatMoney(offsetProfitTotal)],
@@ -4153,7 +4562,7 @@
 
   function renderFinanceCharts(movements, totals) {
     const expenseMovements = movements.filter((movement) => movement.source === "expense");
-    const incomeMovements = movements.filter((movement) => movement.source === "rental" && movement.type === "income");
+    const incomeMovements = movements.filter((movement) => movement.type === "income");
 
     drawPieChart("financeMixChart", "financeMixLegend", [
       { label: "Entradas", value: totals.incomeTotal, color: "#138a43" },
@@ -4291,6 +4700,36 @@
       if (settlement.remaining > 0) movements.push({ ...base, id: `rental-receivable-${rental.id}`, type: "pending-income", amount: settlement.remaining, date: rental.startDate || rental.orderDate, paymentMethod: "-", notes: "" });
     });
 
+    state.stockMovements
+      .filter((sale) => sale.type === "sale")
+      .forEach((sale) => {
+        const receiptType = sale.receiptType || "cash";
+        const type = receiptType === "supplier-offset"
+          ? "supplier-offset"
+          : receiptType === "receivable"
+            ? "pending-income"
+            : "income";
+        const item = getItem(sale.itemId);
+        movements.push({
+          id: `product-sale-${sale.id}`,
+          source: "product-sale",
+          saleId: sale.id,
+          expenseId: sale.expenseId || null,
+          category: "Venda de produtos",
+          title: sale.itemName || item?.name || "Produto vendido",
+          type,
+          amount: toNumber(sale.amount),
+          date: sale.date,
+          paymentMethod: receiptType === "supplier-offset" ? "Compensado com fornecedor" : sale.paymentMethod || "-",
+          buyer: sale.buyer || "",
+          supplier: sale.supplier || "",
+          notes: sale.notes || "",
+          qty: toNumber(sale.qty),
+          unitPrice: toNumber(sale.unitPrice),
+          receiptType,
+        });
+      });
+
     state.expenses.forEach((expense) => {
       const settlement = getExpenseSettlement(expense);
       const base = {
@@ -4303,11 +4742,13 @@
         id: `legacy-expense-${expense.id}`, amount: settlement.legacyAmount, date: expense.paidAt?.slice(0, 10) || getExpenseDate(expense),
         paymentMethod: expense.paymentMethod || "-", notes: "Migrado - revisar data", legacy: true,
       }] : [];
-      records.forEach((payment) => movements.push({
+      records
+        .filter((payment) => !payment.stockMovementId || !state.stockMovements.some((sale) => sale.type === "sale" && Number(sale.id) === Number(payment.stockMovementId)))
+        .forEach((payment) => movements.push({
         ...base, id: `expense-payment-${payment.id}`, type: payment.kind === "supplier-offset-sale" ? "supplier-offset" : "paid-expense",
         amount: toNumber(payment.amount), date: payment.date, paymentMethod: payment.paymentMethod || "-", notes: payment.notes || "",
         supplier: payment.supplier || "", buyer: payment.buyer || "", profit: payment.profit, legacy: payment.legacy,
-      }));
+        }));
       if (settlement.remaining > 0) movements.push({
         ...base, id: `expense-pending-${expense.id}`, type: financeTypeForExpense({ ...expense, status: settlement.status }),
         amount: settlement.remaining, date: getExpenseDate(expense), paymentMethod: "-", notes: expense.notes || "",
@@ -4374,6 +4815,37 @@
             <div class="metric"><span>Categoria</span><strong>${escapeHtml(movement.category)}</strong></div>
           </div>
           <p class="muted-text">${escapeHtml(movement.itemText || "Sem itens")}</p>
+        </article>
+      `;
+    }
+
+    if (movement.source === "product-sale") {
+      const isCash = movement.type === "income";
+      const isReceivable = movement.type === "pending-income";
+      const title = movement.type === "supplier-offset"
+        ? "Venda com abatimento"
+        : isCash
+          ? "Venda recebida"
+          : "Venda a receber";
+      return `
+        <article class="data-card">
+          <div class="card-top">
+            <div>
+              <h3 class="card-title">${title} - ${escapeHtml(movement.title)}</h3>
+              <p class="card-subtitle">Venda de produtos · ${formatDate(movement.date)}</p>
+            </div>
+            <div class="badge-row">
+              <span class="badge ${isCash ? "green" : movement.type === "supplier-offset" ? "blue" : "yellow"}">${isCash ? "Entrada de caixa" : movement.type === "supplier-offset" ? "Abatimento ao fornecedor" : "A receber"}</span>
+            </div>
+          </div>
+          <div class="metric-grid">
+            <div class="metric"><span>${isReceivable ? "Valor a receber" : "Valor da venda"}</span><strong>${formatMoney(movement.amount)}</strong></div>
+            <div class="metric"><span>Quantidade</span><strong>${movement.qty}</strong></div>
+            <div class="metric"><span>Valor unitário</span><strong>${formatMoney(movement.unitPrice)}</strong></div>
+            <div class="metric"><span>Recebimento</span><strong>${escapeHtml(movement.paymentMethod)}</strong></div>
+          </div>
+          <p class="muted-text">${movement.buyer ? `Comprador: ${escapeHtml(movement.buyer)}` : "Comprador não informado"}${movement.supplier ? ` · fornecedor: ${escapeHtml(movement.supplier)}` : ""}</p>
+          ${movement.notes ? `<p class="muted-text">Obs.: ${escapeHtml(movement.notes)}</p>` : ""}
         </article>
       `;
     }
@@ -5508,7 +5980,11 @@
       openExpenseModal(record);
     } else if (button.dataset.action === "edit-payment") {
       const payment = state.payments.find((entry) => Number(entry.id) === Number(button.dataset.paymentId));
-      if (payment?.kind === "supplier-offset-sale") openSupplierOffsetModal(getExpense(payment.recordId), payment);
+      const sale = payment?.stockMovementId
+        ? state.stockMovements.find((movement) => movement.type === "sale" && Number(movement.id) === Number(payment.stockMovementId))
+        : null;
+      if (sale) openStockSaleModal(sale);
+      else if (payment?.kind === "supplier-offset-sale") openSupplierOffsetModal(getExpense(payment.recordId), payment);
       else if (payment) openRecordPaymentModal(recordType, record, payment);
     } else if (button.dataset.action === "delete-payment") {
       const payment = state.payments.find((entry) => Number(entry.id) === Number(button.dataset.paymentId));
@@ -5643,6 +6119,14 @@
   }
 
   async function deletePayment(payment) {
+    const linkedSale = payment?.stockMovementId
+      ? state.stockMovements.find((movement) => movement.type === "sale" && Number(movement.id) === Number(payment.stockMovementId))
+      : null;
+    if (linkedSale) {
+      await deleteStockSale(linkedSale);
+      return;
+    }
+
     const isOffset = payment.kind === "supplier-offset-sale";
     if (!confirm(`${isOffset ? "Excluir este abatimento e restaurar o estoque vendido" : "Excluir este pagamento"}?`)) return;
     if (isOffset) await restoreOffsetInventory(payment);

@@ -1296,6 +1296,10 @@ textarea:focus {
   display: none;
 }
 
+.sale-offset-fields.hidden {
+  display: none;
+}
+
 .detail-grid {
   display: grid;
   gap: 8px;
@@ -1513,7 +1517,7 @@ body.menu-open {
   }
 
   .item-detail-tabs {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 
   .receipt-grid,
